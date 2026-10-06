@@ -3,19 +3,15 @@ from datetime import datetime, timezone
 import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
-BASE="https://fapi.binance.com"
-app=FastAPI(title="Futures Trading AI V2",version="2.1.0")
-cache={"status":"starting","version":"2.1.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+BASE="https://api.bybit.com"
+app=FastAPI(title="Futures Trading AI V2",version="2.2.0")
+cache={"status":"starting","version":"2.2.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
-    for attempt in range(4):
-        r=await c.get(BASE+path,params=params,timeout=20)
-        if r.status_code in (418,429):
-            wait=int(r.headers.get("Retry-After","60"))
-            if attempt==3: r.raise_for_status()
-            await asyncio.sleep(min(max(wait,30),300)); continue
-        r.raise_for_status(); return r.json()
-    raise RuntimeError("Binance rate limit retry exhausted")
+    r=await c.get(BASE+path,params=params,timeout=20); r.raise_for_status()
+    j=r.json()
+    if j.get("retCode",0)!=0: raise RuntimeError(f'Bybit {j.get("retCode")}: {j.get("retMsg")}')
+    return j["result"]
 
 def ind(rows):
     d=pd.DataFrame(rows,columns=["t","o","h","l","c","v","ct","q","n","tb","tq","x"])
@@ -48,15 +44,20 @@ def ind(rows):
 
 async def oi_change(c,symbol):
     try:
-        x=await get(c,"/futures/data/openInterestHist",{"symbol":symbol,"period":"15m","limit":5})
-        vals=[float(a["sumOpenInterest"]) for a in x]
-        return (vals[-1]/vals[0]-1) if len(vals)>1 and vals[0] else 0
-    except Exception:return 0
+        x=await get(c,"/v5/market/open-interest",{"category":"linear","symbol":symbol,"intervalTime":"15min","limit":5})
+        vals=[float(a["openInterest"]) for a in reversed(x["list"])]
+        return ((vals[-1]/vals[0]-1) if len(vals)>1 and vals[0] else 0), vals[-1] if vals else 0
+    except Exception:return 0,0
 
 async def analyze(c,symbol,funding):
     f={}
-    for tf in ("15m","1h","4h"): f[tf]=ind(await get(c,"/fapi/v1/klines",{"symbol":symbol,"interval":tf,"limit":220}))
-    oi,oid=await asyncio.gather(get(c,"/fapi/v1/openInterest",{"symbol":symbol}),oi_change(c,symbol))
+    for tf,iv in (("15m","15"),("1h","60"),("4h","240")):
+        k=await get(c,"/v5/market/kline",{"category":"linear","symbol":symbol,"interval":iv,"limit":220})
+        rows=[]
+        for a in reversed(k["list"]):
+            rows.append([a[0],a[1],a[2],a[3],a[4],a[5],0,a[6],0,0,0,0])
+        f[tf]=ind(rows)
+    oid,oi_now=await oi_change(c,symbol)
     w={"15m":.25,"1h":.35,"4h":.40}
     trend=sum(w[t]*(0.65*f[t]["trend"]+0.35*f[t]["macro"])*(.5+.5*f[t]["trend_strength"]) for t in w)
     momentum=sum(w[t]*f[t]["momentum"] for t in w)
@@ -77,12 +78,12 @@ async def analyze(c,symbol,funding):
     return {"symbol":symbol,"side":side,"score":score,"entry":p,"stop":stop,"tp1":tp1,"tp2":tp2,
       "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
       "rsi_15m":round(f["15m"]["rsi"],1),"adx_15m":round(f["15m"]["adx"],1),"volume_ratio":round(f["15m"]["volratio"],2),
-      "funding":fr,"open_interest":float(oi["openInterest"]),"oi_change_1h_pct":round(oid*100,2),
+      "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
 
 async def scan_once():
     global cache
-    async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2"}) as c:
+    async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit"}) as c:
         info,tickers,prem=await asyncio.gather(get(c,"/fapi/v1/exchangeInfo"),get(c,"/fapi/v1/ticker/24hr"),get(c,"/fapi/v1/premiumIndex"))
         valid={s["symbol"] for s in info["symbols"] if s["contractType"]=="PERPETUAL" and s["quoteAsset"]=="USDT" and s["status"]=="TRADING"}
         liquid=sorted((x for x in tickers if x["symbol"] in valid),key=lambda x:float(x["quoteVolume"]),reverse=True)
