@@ -4,11 +4,18 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASE="https://fapi.binance.com"
-app=FastAPI(title="Futures Trading AI V2",version="2.0.0")
-cache={"status":"starting","version":"2.0.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.1.0")
+cache={"status":"starting","version":"2.1.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
-    r=await c.get(BASE+path,params=params,timeout=20); r.raise_for_status(); return r.json()
+    for attempt in range(4):
+        r=await c.get(BASE+path,params=params,timeout=20)
+        if r.status_code in (418,429):
+            wait=int(r.headers.get("Retry-After","60"))
+            if attempt==3: r.raise_for_status()
+            await asyncio.sleep(min(max(wait,30),300)); continue
+        r.raise_for_status(); return r.json()
+    raise RuntimeError("Binance rate limit retry exhausted")
 
 def ind(rows):
     d=pd.DataFrame(rows,columns=["t","o","h","l","c","v","ct","q","n","tb","tq","x"])
@@ -80,7 +87,7 @@ async def scan_once():
         valid={s["symbol"] for s in info["symbols"] if s["contractType"]=="PERPETUAL" and s["quoteAsset"]=="USDT" and s["status"]=="TRADING"}
         liquid=sorted((x for x in tickers if x["symbol"] in valid),key=lambda x:float(x["quoteVolume"]),reverse=True)
         symbols=[x["symbol"] for x in liquid[:int(os.getenv("SCAN_PAIRS","30"))]]
-        funding={x["symbol"]:x.get("lastFundingRate",0) for x in prem}; sem=asyncio.Semaphore(4)
+        funding={x["symbol"]:x.get("lastFundingRate",0) for x in prem}; sem=asyncio.Semaphore(2)
         async def one(s):
             async with sem:
                 try:return await analyze(c,s,funding)
@@ -94,7 +101,7 @@ async def loop():
     while True:
         try: await scan_once()
         except Exception as e: cache.update(status="error",error=str(e))
-        await asyncio.sleep(int(os.getenv("SCAN_SECONDS","300")))
+        await asyncio.sleep(max(int(os.getenv("SCAN_SECONDS","600")),600))
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(loop())
