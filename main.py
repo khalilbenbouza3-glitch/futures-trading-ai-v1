@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.3.1")
-cache={"status":"starting","version":"2.3.1","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.4.0")
+cache={"status":"starting","version":"2.4.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -76,14 +76,25 @@ async def analyze(c,symbol,funding):
     oi_sig=(1 if oid>0.01 else (-1 if oid<-0.01 else 0))*np.sign(trend if trend else momentum)
     derivatives=.55*funding_sig+.45*oi_sig
     raw=.30*trend+.20*momentum+.20*structure+.10*volume+.10*vwap+.10*derivatives
-    raw=float(np.clip(raw,-1,1)); score=round(abs(raw)*100,1)
-    side="NEUTRAL" if score<55 else ("LONG" if raw>0 else "SHORT")
+    raw=float(np.clip(raw,-1,1))
+    preliminary_side="LONG" if raw>0 else "SHORT"
+    rsi15=f["15m"]["rsi"]
+    chase_penalty=0.0
+    chase_reason=None
+    if preliminary_side=="SHORT" and rsi15<25:
+        chase_penalty=min((25-rsi15)*1.5,20.0)
+        chase_reason="SHORT_AFTER_OVERSOLD"
+    elif preliminary_side=="LONG" and rsi15>75:
+        chase_penalty=min((rsi15-75)*1.5,20.0)
+        chase_reason="LONG_AFTER_OVERBOUGHT"
+    score=round(max(abs(raw)*100-chase_penalty,0),1)
+    side="NEUTRAL" if score<55 else preliminary_side
     p=f["15m"]["price"]; risk=1.5*f["15m"]["atr"]
     stop=tp1=tp2=None
     if side!="NEUTRAL":
         stop=p-risk if side=="LONG" else p+risk; tp1=p+2*risk if side=="LONG" else p-2*risk; tp2=p+3*risk if side=="LONG" else p-3*risk
     return {"symbol":symbol,"side":side,"score":score,"entry":p,"stop":stop,"tp1":tp1,"tp2":tp2,
-      "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
+      "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},\n      "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
       "rsi_15m":round(f["15m"]["rsi"],1),"adx_15m":round(f["15m"]["adx"],1),"volume_ratio":round(f["15m"]["volratio"],2),
       "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
@@ -106,7 +117,7 @@ async def scan_once():
                     return None
         out=[x for x in await asyncio.gather(*(one(s) for s in symbols)) if x]
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
-        cache={"status":"ok","version":"2.3.1","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":"ok","version":"2.4.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "pairs_scanned":len(out),"actionable_signals":len(ranked),"signals":ranked[:10]}
 
 async def loop():
