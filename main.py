@@ -221,6 +221,28 @@ async def loop():
 async def startup(): asyncio.create_task(loop())
 @app.get("/")
 def root(): return {"service":"futures-trading-ai-v2","mode":"SIGNAL_ONLY","status":cache["status"],"updated_at":cache["updated_at"]}
+@app.get("/binodex-status")
+async def binodex_status():
+    key=os.getenv("OTCHARTS_API_KEY")
+    if not key:
+        return {"connected":False,"binodex_enabled":False,"error":"API_KEY_MISSING"}
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r=await c.get("https://otcharts.com/v1/usage",
+                headers={"Authorization":"Bearer "+key})
+        if r.status_code!=200:
+            return {"connected":False,"binodex_enabled":False,
+                    "http_status":r.status_code,"error":"AUTH_FAILED"}
+        j=r.json()
+        books=j.get("books",[])
+        return {"connected":True,"binodex_enabled":"binodex" in books,
+                "plan":j.get("planName") or j.get("plan"),
+                "books":books,"requests":j.get("requests"),
+                "streams":j.get("streams")}
+    except Exception as e:
+        return {"connected":False,"binodex_enabled":False,
+                "error":type(e).__name__}
+
 @app.get("/health")
 def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error")}
 @app.get("/signals")
