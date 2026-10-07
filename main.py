@@ -94,7 +94,8 @@ async def analyze(c,symbol,funding):
     if side!="NEUTRAL":
         stop=p-risk if side=="LONG" else p+risk; tp1=p+2*risk if side=="LONG" else p-2*risk; tp2=p+3*risk if side=="LONG" else p-3*risk
     return {"symbol":symbol,"side":side,"score":score,"entry":p,"stop":stop,"tp1":tp1,"tp2":tp2,
-      "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},\n      "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
+      "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
+      "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
       "rsi_15m":round(f["15m"]["rsi"],1),"adx_15m":round(f["15m"]["adx"],1),"volume_ratio":round(f["15m"]["volratio"],2),
       "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
