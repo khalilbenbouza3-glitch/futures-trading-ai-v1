@@ -197,6 +197,11 @@ async def scan_once():
                     "anti_chase_penalty":x["anti_chase_penalty"],
                     "entry":x.get("entry"),"stop":x.get("stop"),
                     "tp1":x.get("tp1"),"tp2":x.get("tp2"),
+                    "atr_15m":x.get("atr_15m"),
+                    "candidate_entry":x.get("candidate_entry"),
+                    "candidate_stop":x.get("candidate_stop"),
+                    "candidate_tp1":x.get("candidate_tp1"),
+                    "candidate_tp2":x.get("candidate_tp2"),
                     "rr_tp1":x.get("rr_tp1"),"rr_tp2":x.get("rr_tp2"),
                     "live_price":x.get("live_price"),
                     "entry_drift_r":x.get("entry_drift_r"),
@@ -208,7 +213,7 @@ async def scan_once():
 
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.8.1","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.9.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
                "actionable_signals":len(ranked),"signals":ranked[:10],
