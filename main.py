@@ -221,6 +221,24 @@ async def loop():
 async def startup(): asyncio.create_task(loop())
 @app.get("/")
 def root(): return {"service":"futures-trading-ai-v2","mode":"SIGNAL_ONLY","status":cache["status"],"updated_at":cache["updated_at"]}
+@app.get("/binodex-symbols")
+async def binodex_symbols():
+    key=os.getenv("OTCHARTS_API_KEY")
+    if not key:
+        return {"ok":False,"error":"API_KEY_MISSING"}
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r=await c.get("https://otcharts.com/v1/symbols",
+                params={"venue":"binodex"},
+                headers={"Authorization":"Bearer "+key})
+        if r.status_code!=200:
+            return {"ok":False,"http_status":r.status_code,"error":"SYMBOLS_FAILED"}
+        j=r.json()
+        return {"ok":True,"venue":"binodex","count":j.get("count"),
+                "symbols":j.get("symbols",[])}
+    except Exception as e:
+        return {"ok":False,"error":type(e).__name__}
+
 @app.get("/binodex-status")
 async def binodex_status():
     key=os.getenv("OTCHARTS_API_KEY")
