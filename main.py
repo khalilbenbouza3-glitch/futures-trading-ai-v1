@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.4.0")
-cache={"status":"starting","version":"2.4.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.5.0")
+cache={"status":"starting","version":"2.5.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -104,11 +104,24 @@ async def scan_once():
     global cache
     async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit","Accept":"application/json"}) as c:
         tickers=await get(c,"/v5/market/tickers",{"category":"linear"})
-        items=[x for x in tickers["list"] if x.get("symbol","").endswith("USDT")]
+        instruments=await get(c,"/v5/market/instruments-info",{"category":"linear","limit":1000})
+        active={x["symbol"] for x in instruments["list"]
+                if x.get("status")=="Trading"
+                and x.get("contractType")=="LinearPerpetual"
+                and x.get("quoteCoin")=="USDT"}
+        items=[x for x in tickers["list"] if x.get("symbol") in active]
         liquid=sorted(items,key=lambda x:float(x.get("turnover24h") or 0),reverse=True)
-        symbols=[x["symbol"] for x in liquid[:min(int(os.getenv("SCAN_PAIRS","15")),15)]]
+
+        # Stage 1: every active USDT perpetual enters the universe.
+        # Cheap liquidity prefilter avoids running 3-timeframe analysis on hundreds
+        # of illiquid contracts and keeps the public API within practical limits.
+        min_turnover=float(os.getenv("MIN_TURNOVER_24H","1000000"))
+        eligible=[x for x in liquid if float(x.get("turnover24h") or 0)>=min_turnover]
+        deep_limit=max(1,int(os.getenv("DEEP_SCAN_PAIRS","60")))
+        candidates=eligible[:deep_limit]
+        symbols=[x["symbol"] for x in candidates]
         funding={x["symbol"]:x.get("fundingRate",0) or 0 for x in items}
-        sem=asyncio.Semaphore(2)
+        sem=asyncio.Semaphore(max(1,int(os.getenv("SCAN_CONCURRENCY","3"))))
         async def one(s):
             async with sem:
                 try:
@@ -118,8 +131,12 @@ async def scan_once():
                     return None
         out=[x for x in await asyncio.gather(*(one(s) for s in symbols)) if x]
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
-        cache={"status":"ok","version":"2.4.0","updated_at":datetime.now(timezone.utc).isoformat(),
-               "pairs_scanned":len(out),"actionable_signals":len(ranked),"signals":ranked[:10]}
+        failed=len(symbols)-len(out)
+        status="ok" if out and failed==0 else ("partial" if out else "error")
+        cache={"status":status,"version":"2.5.0","updated_at":datetime.now(timezone.utc).isoformat(),
+               "market_universe":len(active),"eligible_pairs":len(eligible),
+               "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
+               "actionable_signals":len(ranked),"signals":ranked[:10]}
 
 async def loop():
     while True:
@@ -127,7 +144,7 @@ async def loop():
         except Exception as e:
             print(f"SCAN_ERROR {type(e).__name__}: {e}", flush=True)
             cache.update(status="error",error=f"{type(e).__name__}: {e}")
-        await asyncio.sleep(max(int(os.getenv("SCAN_SECONDS","600")),600))
+        await asyncio.sleep(max(int(os.getenv("SCAN_SECONDS","300")),300))
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(loop())
