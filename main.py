@@ -3,15 +3,22 @@ from datetime import datetime, timezone
 import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
-BASE="https://api.bybit.com"
-app=FastAPI(title="Futures Trading AI V2",version="2.2.0")
-cache={"status":"starting","version":"2.2.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+BASES=["https://api.bybit.com","https://api.bytick.com"]
+app=FastAPI(title="Futures Trading AI V2",version="2.3.0")
+cache={"status":"starting","version":"2.3.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
-    r=await c.get(BASE+path,params=params,timeout=20); r.raise_for_status()
-    j=r.json()
-    if j.get("retCode",0)!=0: raise RuntimeError(f'Bybit {j.get("retCode")}: {j.get("retMsg")}')
-    return j["result"]
+    errors=[]
+    for base in BASES:
+        try:
+            r=await c.get(base+path,params=params,timeout=12)
+            r.raise_for_status()
+            j=r.json()
+            if j.get("retCode",0)!=0: raise RuntimeError(f'Bybit {j.get("retCode")}: {j.get("retMsg")}')
+            return j["result"]
+        except Exception as e:
+            errors.append(f"{base}: {type(e).__name__}: {e}")
+    raise RuntimeError(" | ".join(errors))
 
 def ind(rows):
     d=pd.DataFrame(rows,columns=["t","o","h","l","c","v","ct","q","n","tb","tq","x"])
@@ -83,16 +90,17 @@ async def analyze(c,symbol,funding):
 
 async def scan_once():
     global cache
-    async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit"}) as c:
+    async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit","Accept":"application/json"}) as c:
         info,tickers,prem=await asyncio.gather(get(c,"/fapi/v1/exchangeInfo"),get(c,"/fapi/v1/ticker/24hr"),get(c,"/fapi/v1/premiumIndex"))
         valid={s["symbol"] for s in info["symbols"] if s["contractType"]=="PERPETUAL" and s["quoteAsset"]=="USDT" and s["status"]=="TRADING"}
         liquid=sorted((x for x in tickers if x["symbol"] in valid),key=lambda x:float(x["quoteVolume"]),reverse=True)
-        symbols=[x["symbol"] for x in liquid[:int(os.getenv("SCAN_PAIRS","30"))]]
+        symbols=[x["symbol"] for x in liquid[:min(int(os.getenv("SCAN_PAIRS","15")),15)]]
         funding={x["symbol"]:x.get("lastFundingRate",0) for x in prem}; sem=asyncio.Semaphore(2)
         async def one(s):
             async with sem:
                 try:return await analyze(c,s,funding)
-                except Exception:return None
+                except Exception as e:
+                    print(f"PAIR_ERROR {s}: {type(e).__name__}: {e}", flush=True); return None
         out=[x for x in await asyncio.gather(*(one(s) for s in symbols)) if x]
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
         cache={"status":"ok","version":"2.0.0","updated_at":datetime.now(timezone.utc).isoformat(),"pairs_scanned":len(out),
@@ -101,7 +109,9 @@ async def scan_once():
 async def loop():
     while True:
         try: await scan_once()
-        except Exception as e: cache.update(status="error",error=str(e))
+        except Exception as e:
+            print(f"SCAN_ERROR {type(e).__name__}: {e}", flush=True)
+            cache.update(status="error",error=f"{type(e).__name__}: {e}")
         await asyncio.sleep(max(int(os.getenv("SCAN_SECONDS","600")),600))
 
 @app.on_event("startup")
@@ -109,7 +119,7 @@ async def startup(): asyncio.create_task(loop())
 @app.get("/")
 def root(): return {"service":"futures-trading-ai-v2","mode":"SIGNAL_ONLY","status":cache["status"],"updated_at":cache["updated_at"]}
 @app.get("/health")
-def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"]}
+def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error")}
 @app.get("/signals")
 def signals(): return cache
 @app.post("/scan")
