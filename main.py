@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.5.0")
-cache={"status":"starting","version":"2.5.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.6.0")
+cache={"status":"starting","version":"2.6.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -89,6 +89,23 @@ async def analyze(c,symbol,funding):
         chase_reason="LONG_AFTER_OVERBOUGHT"
     score=round(max(abs(raw)*100-chase_penalty,0),1)
     side="NEUTRAL" if score<55 else preliminary_side
+
+    # Candidate entry-quality gate. These thresholds are explicit heuristics
+    # and must be validated by backtesting before any live execution.
+    vol15=f["15m"]["volratio"]
+    adx15=f["15m"]["adx"]
+    oi_aligned=(oid>=0 if preliminary_side=="LONG" else oid<=0)
+    gate_checks={
+        "score": score>=70,
+        "volume": vol15>=0.75,
+        "adx": adx15>=25,
+        "rsi": (30<=rsi15<=72) if preliminary_side=="LONG" else (28<=rsi15<=70),
+        "oi": oi_aligned or abs(oid)<0.01,
+    }
+    gate_passed=all(gate_checks.values()) and side!="NEUTRAL"
+    if not gate_passed:
+        side="NEUTRAL"
+
     p=f["15m"]["price"]; risk=1.5*f["15m"]["atr"]
     stop=tp1=tp2=None
     if side!="NEUTRAL":
@@ -96,6 +113,7 @@ async def analyze(c,symbol,funding):
     return {"symbol":symbol,"side":side,"score":score,"entry":p,"stop":stop,"tp1":tp1,"tp2":tp2,
       "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
       "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
+      "entry_gate_passed":gate_passed,"entry_gate_checks":gate_checks,
       "rsi_15m":round(f["15m"]["rsi"],1),"adx_15m":round(f["15m"]["adx"],1),"volume_ratio":round(f["15m"]["volratio"],2),
       "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
@@ -133,7 +151,7 @@ async def scan_once():
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.5.0","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.6.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
                "actionable_signals":len(ranked),"signals":ranked[:10]}
