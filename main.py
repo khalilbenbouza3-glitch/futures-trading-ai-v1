@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.3.0")
-cache={"status":"starting","version":"2.3.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.3.1")
+cache={"status":"starting","version":"2.3.1","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -91,20 +91,23 @@ async def analyze(c,symbol,funding):
 async def scan_once():
     global cache
     async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit","Accept":"application/json"}) as c:
-        info,tickers,prem=await asyncio.gather(get(c,"/fapi/v1/exchangeInfo"),get(c,"/fapi/v1/ticker/24hr"),get(c,"/fapi/v1/premiumIndex"))
-        valid={s["symbol"] for s in info["symbols"] if s["contractType"]=="PERPETUAL" and s["quoteAsset"]=="USDT" and s["status"]=="TRADING"}
-        liquid=sorted((x for x in tickers if x["symbol"] in valid),key=lambda x:float(x["quoteVolume"]),reverse=True)
+        tickers=await get(c,"/v5/market/tickers",{"category":"linear"})
+        items=[x for x in tickers["list"] if x.get("symbol","").endswith("USDT")]
+        liquid=sorted(items,key=lambda x:float(x.get("turnover24h") or 0),reverse=True)
         symbols=[x["symbol"] for x in liquid[:min(int(os.getenv("SCAN_PAIRS","15")),15)]]
-        funding={x["symbol"]:x.get("lastFundingRate",0) for x in prem}; sem=asyncio.Semaphore(2)
+        funding={x["symbol"]:x.get("fundingRate",0) or 0 for x in items}
+        sem=asyncio.Semaphore(2)
         async def one(s):
             async with sem:
-                try:return await analyze(c,s,funding)
+                try:
+                    return await analyze(c,s,funding)
                 except Exception as e:
-                    print(f"PAIR_ERROR {s}: {type(e).__name__}: {e}", flush=True); return None
+                    print(f"PAIR_ERROR {s}: {type(e).__name__}: {e}",flush=True)
+                    return None
         out=[x for x in await asyncio.gather(*(one(s) for s in symbols)) if x]
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
-        cache={"status":"ok","version":"2.0.0","updated_at":datetime.now(timezone.utc).isoformat(),"pairs_scanned":len(out),
-          "actionable_signals":len(ranked),"signals":ranked[:10]}
+        cache={"status":"ok","version":"2.3.1","updated_at":datetime.now(timezone.utc).isoformat(),
+               "pairs_scanned":len(out),"actionable_signals":len(ranked),"signals":ranked[:10]}
 
 async def loop():
     while True:
