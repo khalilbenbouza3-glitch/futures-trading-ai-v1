@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.7.0")
-cache={"status":"starting","version":"2.7.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.8.0")
+cache={"status":"starting","version":"2.8.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -114,6 +114,7 @@ async def analyze(c,symbol,funding):
       "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
       "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
       "entry_gate_passed":gate_passed,"entry_gate_checks":gate_checks,
+      "candidate_side":preliminary_side,
       "rsi_15m":round(f["15m"]["rsi"],1),"adx_15m":round(f["15m"]["adx"],1),"volume_ratio":round(f["15m"]["volratio"],2),
       "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
@@ -171,12 +172,35 @@ async def scan_once():
                 sig["rr_tp1"]=sig["rr_tp2"]=None
 
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
+
+        # Diagnostic near-misses do not relax the trading gate.
+        near=[]
+        for x in out:
+            if x["side"]!="NEUTRAL":
+                continue
+            checks=x.get("entry_gate_checks",{})
+            failed_checks=[k for k,v in checks.items() if not v]
+            # Prefer candidates failing the fewest checks, then the highest score.
+            if checks:
+                near.append({
+                    "symbol":x["symbol"],"candidate_side":x.get("candidate_side"),
+                    "score":x["score"],"failed_checks":failed_checks,
+                    "passed_checks":sum(1 for v in checks.values() if v),
+                    "rsi_15m":x["rsi_15m"],"adx_15m":x["adx_15m"],
+                    "volume_ratio":x["volume_ratio"],
+                    "oi_change_1h_pct":x["oi_change_1h_pct"],
+                    "anti_chase_penalty":x["anti_chase_penalty"],
+                    "price_validation_reason":x.get("price_validation_reason")
+                })
+        near=sorted(near,key=lambda x:(-x["passed_checks"],-x["score"]))[:10]
+
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.7.0","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.8.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
-               "actionable_signals":len(ranked),"signals":ranked[:10]}
+               "actionable_signals":len(ranked),"signals":ranked[:10],
+               "near_misses":near}
 
 async def loop():
     while True:
