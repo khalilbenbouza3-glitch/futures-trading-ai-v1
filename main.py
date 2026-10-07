@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.8.0")
-cache={"status":"starting","version":"2.8.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.8.1")
+cache={"status":"starting","version":"2.8.1","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -190,13 +190,20 @@ async def scan_once():
                     "volume_ratio":x["volume_ratio"],
                     "oi_change_1h_pct":x["oi_change_1h_pct"],
                     "anti_chase_penalty":x["anti_chase_penalty"],
-                    "price_validation_reason":x.get("price_validation_reason")
+                    "entry":x.get("entry"),"stop":x.get("stop"),
+                    "tp1":x.get("tp1"),"tp2":x.get("tp2"),
+                    "rr_tp1":x.get("rr_tp1"),"rr_tp2":x.get("rr_tp2"),
+                    "live_price":x.get("live_price"),
+                    "entry_drift_r":x.get("entry_drift_r"),
+                    "price_validation_passed":x.get("price_validation_passed"),
+                    "price_validation_reason":x.get("price_validation_reason"),
+                    "status":"UNCONFIRMED"
                 })
         near=sorted(near,key=lambda x:(-x["passed_checks"],-x["score"]))[:10]
 
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.8.0","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.8.1","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
                "actionable_signals":len(ranked),"signals":ranked[:10],
