@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.8.1")
-cache={"status":"starting","version":"2.8.1","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.9.0")
+cache={"status":"starting","version":"2.9.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -106,11 +106,16 @@ async def analyze(c,symbol,funding):
     if not gate_passed:
         side="NEUTRAL"
 
-    p=f["15m"]["price"]; risk=1.5*f["15m"]["atr"]
-    stop=tp1=tp2=None
-    if side!="NEUTRAL":
-        stop=p-risk if side=="LONG" else p+risk; tp1=p+2*risk if side=="LONG" else p-2*risk; tp2=p+3*risk if side=="LONG" else p-3*risk
+    p=f["15m"]["price"]; atr15=f["15m"]["atr"]; risk=1.5*atr15
+    candidate_stop=p-risk if preliminary_side=="LONG" else p+risk
+    candidate_tp1=p+2*risk if preliminary_side=="LONG" else p-2*risk
+    candidate_tp2=p+3*risk if preliminary_side=="LONG" else p-3*risk
+    stop=candidate_stop if side!="NEUTRAL" else None
+    tp1=candidate_tp1 if side!="NEUTRAL" else None
+    tp2=candidate_tp2 if side!="NEUTRAL" else None
     return {"symbol":symbol,"side":side,"score":score,"entry":p,"stop":stop,"tp1":tp1,"tp2":tp2,
+      "atr_15m":round(atr15,8),"candidate_entry":p,"candidate_stop":candidate_stop,
+      "candidate_tp1":candidate_tp1,"candidate_tp2":candidate_tp2,
       "components":{"trend":round(trend,3),"momentum":round(momentum,3),"structure":round(structure,3),"volume":round(volume,3),"vwap":round(vwap,3),"derivatives":round(float(derivatives),3)},
       "anti_chase_penalty":round(chase_penalty,1),"anti_chase_reason":chase_reason,
       "entry_gate_passed":gate_passed,"entry_gate_checks":gate_checks,
