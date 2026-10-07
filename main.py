@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.6.0")
-cache={"status":"starting","version":"2.6.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.7.0")
+cache={"status":"starting","version":"2.7.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -148,10 +148,32 @@ async def scan_once():
                     print(f"PAIR_ERROR {s}: {type(e).__name__}: {e}",flush=True)
                     return None
         out=[x for x in await asyncio.gather(*(one(s) for s in symbols)) if x]
+
+        # Final live-price validation: an analysis signal is not actionable if
+        # price has already moved too far from its computed entry or crossed SL.
+        live_price={x["symbol"]:float(x.get("lastPrice") or 0) for x in items}
+        for sig in out:
+            if sig["side"]=="NEUTRAL":
+                continue
+            lp=live_price.get(sig["symbol"],0)
+            entry=sig["entry"]; stop=sig["stop"]
+            risk=abs(stop-entry) if stop is not None else 0
+            crossed_stop=(sig["side"]=="LONG" and lp<=stop) or (sig["side"]=="SHORT" and lp>=stop)
+            drift_r=(abs(lp-entry)/risk) if lp>0 and risk>0 else 999
+            price_valid=(not crossed_stop) and drift_r<=0.35
+            sig["live_price"]=lp
+            sig["entry_drift_r"]=round(drift_r,3)
+            sig["price_validation_passed"]=price_valid
+            sig["price_validation_reason"]=None if price_valid else ("STOP_ALREADY_CROSSED" if crossed_stop else "PRICE_TOO_FAR_FROM_ENTRY")
+            if not price_valid:
+                sig["side"]="NEUTRAL"
+                sig["stop"]=sig["tp1"]=sig["tp2"]=None
+                sig["rr_tp1"]=sig["rr_tp2"]=None
+
         ranked=sorted((x for x in out if x["side"]!="NEUTRAL"),key=lambda x:x["score"],reverse=True)
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.6.0","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.7.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
                "actionable_signals":len(ranked),"signals":ranked[:10]}
