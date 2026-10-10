@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
+import os
 from evaluation import timestamp_ms
 
 INTERVAL_MS = 900000
@@ -19,7 +20,8 @@ INTERVAL_MS = 900000
 async def collect(snapshot, horizon=24):
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     data = {"updated_at": snapshot.get("updated_at"), "signals": [], "candles": {}}
-    async with httpx.AsyncClient(timeout=20) as client:
+    base = os.getenv("SCANNER_URL", "https://futures-trading-ai-v1.onrender.com").rstrip("/")
+    async with httpx.AsyncClient(timeout=35) as client:
         for signal in snapshot.get("signals", []):
             if signal.get("side") not in ("LONG", "SHORT"):
                 continue
@@ -30,20 +32,18 @@ async def collect(snapshot, horizon=24):
             if now_ms < first + horizon * INTERVAL_MS:
                 continue
             response = await client.get(
-                "https://api.bybit.com/v5/market/kline",
-                params={"category": "linear", "symbol": row["symbol"],
-                        "interval": "15", "start": first,
-                        "end": first + (horizon - 1) * INTERVAL_MS,
-                        "limit": min(1000, horizon)})
+                base + "/evaluation-candles",
+                params={"symbol": row["symbol"], "start_ms": first,
+                        "horizon": horizon})
             response.raise_for_status()
             body = response.json()
-            if body.get("retCode") != 0:
-                raise RuntimeError("Bybit candle request failed for " + row["symbol"])
+            if body.get("symbol") != row["symbol"]:
+                raise RuntimeError("Historical candle symbol mismatch")
             candles = [
-                {"start_ms": int(x[0]), "open": float(x[1]), "high": float(x[2]),
-                 "low": float(x[3]), "close": float(x[4])}
-                for x in body["result"]["list"]
-                if int(x[0]) + INTERVAL_MS <= now_ms
+                {"start_ms": int(x["start_ms"]), "open": float(x["open"]), "high": float(x["high"]),
+                 "low": float(x["low"]), "close": float(x["close"])}
+                for x in body["candles"]
+                if int(x["start_ms"]) + INTERVAL_MS <= now_ms
             ]
             data["signals"].append(row)
             data["candles"][row["symbol"]] = sorted(candles, key=lambda x: x["start_ms"])
