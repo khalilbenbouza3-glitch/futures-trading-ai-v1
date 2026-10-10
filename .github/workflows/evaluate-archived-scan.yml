@@ -72,7 +72,7 @@ jobs:
               if p.returncode==0 and os.path.isfile("archive/scan-result.json") and os.path.getsize("archive/scan-result.json")>0:
                   print("Selected archived scan:",run_id)
                   with open(os.environ["GITHUB_OUTPUT"],"a") as out:
-                      out.write(f"scan_id={run_id}\\n")
+                      out.write(f"scan_id={run_id}\n")
                   sys.exit(0)
           print("No unevaluated mature scanner artifact available; skipping.")
           with open(os.environ["GITHUB_OUTPUT"],"a") as out:
