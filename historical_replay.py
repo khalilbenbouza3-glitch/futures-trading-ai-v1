@@ -3,7 +3,7 @@ Downloads a 125-day warmup for 4h EMA200, replays 90 days at closed 15m bars,
 and passes signals to the conservative execution simulator.
 No orders, no account access. Funding cashflows are not yet modeled.
 """
-import asyncio, bisect, json, time
+import asyncio, bisect, json, time, os
 from datetime import datetime, timezone
 import httpx
 import main
@@ -12,7 +12,7 @@ from backtest_execution import simulate
 
 BAR=900000
 WARMUP_DAYS=40
-TEST_DAYS=90
+TEST_DAYS=int(os.getenv("BACKTEST_DAYS","90"))
 
 def at_or_before(stamps, timestamp):
     return bisect.bisect_right(stamps,timestamp)-1
