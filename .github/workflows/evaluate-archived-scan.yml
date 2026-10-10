@@ -1,0 +1,41 @@
+name: Evaluate archived market scan
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Scheduled scanner workflow run ID whose scan-result.json artifact will be evaluated'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install httpx==0.28.1
+      - name: Retrieve archived scanner output
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name latest-market-scan --dir archive
+          test -s archive/scan-result.json
+      - name: Fetch matured closed Bybit candles
+        run: python collect_evaluation.py archive/scan-result.json --output evaluation-input.json
+      - name: Evaluate without trading
+        run: python evaluation.py evaluation-input.json --output evaluation-result.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report
+          path: |
+            evaluation-input.json
+            evaluation-result.json
+          retention-days: 7
