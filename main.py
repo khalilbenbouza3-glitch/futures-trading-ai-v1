@@ -371,7 +371,19 @@ async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
             try:
                 payload = await get(client, path, params)
                 rows = payload.get("list", [])
-                results[label] = {"ok":bool(rows),"count":len(rows)}
+                timestamps = []
+                for row in rows:
+                    raw = (row.get("timestamp") or row.get("fundingRateTimestamp") or row.get("startTime")) if isinstance(row, dict) else (row[0] if row else None)
+                    if raw is not None:
+                        try:
+                            timestamps.append(int(raw))
+                        except (ValueError, TypeError):
+                            pass
+                results[label] = {"ok":bool(rows),"count":len(rows),
+                                  "earliest_timestamp_ms":min(timestamps) if timestamps else None,
+                                  "latest_timestamp_ms":max(timestamps) if timestamps else None,
+                                  "target_timestamp_ms":start_ms,
+                                  "covers_target_sample":bool(timestamps) and min(timestamps) <= start_ms <= max(timestamps)}
             except Exception as exc:
                 results[label] = {"ok":False,"error_type":type(exc).__name__}
     return {"symbol":symbol,"days_ago":days_ago,"results":results,
