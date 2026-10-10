@@ -94,6 +94,9 @@ jobs:
           assert d['summary']['validated_edge'] is False
           print('Evaluated:',d['summary']['evaluated'],'Unresolved:',d['summary']['unresolved'])
           PY
+      - name: Summarize score bands (descriptive only)
+        if: steps.archive.outputs.no_data != 'true'
+        run: python analyze_evaluations.py evaluation-result.json --output research-summary.json
       - uses: actions/upload-artifact@v4
         if: steps.archive.outputs.no_data != 'true'
         with:
@@ -101,4 +104,5 @@ jobs:
           path: |
             evaluation-input.json
             evaluation-result.json
+            research-summary.json
           retention-days: 7
