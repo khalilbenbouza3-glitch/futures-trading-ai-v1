@@ -469,3 +469,36 @@ async def historical_replay_status():
     return replay_state
 
 # Historical backtest runner: read-only.
+
+historical_progress = {"status":"idle","read_only":True}
+historical_once = False
+
+async def historical_run_worker(days):
+    global historical_progress
+    try:
+        import historical_replay
+        historical_replay.TEST_DAYS = days
+        reports = []
+        for symbol in ("BTCUSDT","ETHUSDT"):
+            historical_progress = {"status":"running","symbol":symbol,"days":days,"completed":len(reports),"read_only":True}
+            result = await historical_replay.replay(symbol)
+            reports.append(result)
+        historical_progress = {"status":"finished","days":days,"reports":reports,"read_only":True}
+    except Exception as exc:
+        historical_progress = {"status":"error","error":str(exc)[:300],"read_only":True}
+
+@app.post("/historical-run")
+async def historical_run(days:int=90):
+    global historical_once,historical_progress
+    if days not in (1,7,30,90):
+        return {"error":"invalid days"}
+    if historical_once:
+        return historical_progress
+    historical_once = True
+    historical_progress = {"status":"queued","days":days,"read_only":True}
+    asyncio.create_task(historical_run_worker(days))
+    return historical_progress
+
+@app.get("/historical-run")
+async def historical_status():
+    return historical_progress
