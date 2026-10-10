@@ -60,8 +60,16 @@ async def analyze(c,symbol,funding):
     f={}
     for tf,iv in (("15m","15"),("1h","60"),("4h","240")):
         k=await get(c,"/v5/market/kline",{"category":"linear","symbol":symbol,"interval":iv,"limit":220})
+        # Bybit returns newest-first candles. The newest candle is often still
+        # forming; its partial volume must not be compared with full candles.
+        # Use only completed candles for indicators and volume gates.
+        interval_ms=int(iv)*60_000
+        now_ms=int(datetime.now(timezone.utc).timestamp()*1000)
+        closed=[a for a in k["list"] if int(a[0])+interval_ms<=now_ms]
+        if len(closed)<200:
+            raise ValueError(f"Insufficient closed {tf} candles for {symbol}: {len(closed)}")
         rows=[]
-        for a in reversed(k["list"]):
+        for a in reversed(closed):
             rows.append([a[0],a[1],a[2],a[3],a[4],a[5],0,a[6],0,0,0,0])
         f[tf]=ind(rows)
     oid,oi_now=await oi_change(c,symbol)
