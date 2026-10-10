@@ -1,0 +1,25 @@
+name: Probe historical Bybit data
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install httpx==0.28.1
+      - name: Probe historical market data (read-only)
+        run: python historical_probe.py | tee historical-probe-result.json
+      - name: Upload diagnostic results
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-probe-result
+          path: historical-probe-result.json
+          retention-days: 7
