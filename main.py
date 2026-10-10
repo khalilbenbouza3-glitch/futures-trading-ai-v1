@@ -362,7 +362,7 @@ async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
     start_ms = int((datetime.now(timezone.utc) - timedelta(days=days_ago)).timestamp() * 1000)
     probes = {
         "kline_15m": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"15","start":start_ms,"limit":2}),
-        "funding_history": ("/v5/market/funding/history", {"category":"linear","symbol":symbol,"startTime":start_ms,"limit":2}),
+        "funding_history": ("/v5/market/funding/history", {"category":"linear","symbol":symbol,"endTime":start_ms,"limit":2}),
         "open_interest_history": ("/v5/market/open-interest", {"category":"linear","symbol":symbol,"intervalTime":"15min","startTime":start_ms,"limit":2}),
     }
     results = {}
