@@ -2,9 +2,12 @@ name: Probe historical Bybit data
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - 'historical_probe.py'
       - '.github/workflows/historical-probe.yml'
+  schedule:
+    - cron: '43 3 * * 0'
 
 permissions:
   contents: read
@@ -20,7 +23,9 @@ jobs:
           python-version: '3.11'
       - run: pip install httpx==0.28.1
       - name: Probe historical market data (read-only)
-        run: python historical_probe.py | tee historical-probe-result.json
+        run: |
+          set -o pipefail
+          python historical_probe.py | tee historical-probe-result.json
       - name: Upload diagnostic results
         uses: actions/upload-artifact@v4
         with:
