@@ -20,6 +20,15 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run read-only one-day historical replay
         run: python historical_replay.py
+      - name: Fail when replay did not produce valid reports
+        run: |
+          python - <<'PY'
+          import json,sys
+          reports=json.load(open("historical_replay_report.json"))
+          valid=all(x.get("status")=="REPLAYED" for x in reports) and len(reports)==2
+          print("replay_valid=",valid,"statuses=",[x.get("status") for x in reports])
+          sys.exit(0 if valid else 1)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
