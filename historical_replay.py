@@ -43,6 +43,7 @@ async def replay(symbol):
     candles=[{"start_ms":t,"open":float(v[1]),"high":float(v[2]),
               "low":float(v[3]),"close":float(v[4])} for t,v in sorted(data["15"].items()) if t>=start]
     for close_time in range(start+BAR,end-BAR+1,BAR):
+        await asyncio.sleep(0)  # Keep the web server responsive during CPU-heavy replay.
         # A signal becomes known only when the 15m bar closes.
         # The execution simulator enters at the NEXT bar's open.
         last_open=close_time-BAR
