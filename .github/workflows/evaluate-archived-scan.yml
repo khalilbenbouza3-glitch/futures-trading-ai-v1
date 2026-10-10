@@ -43,8 +43,24 @@ jobs:
                    "-f","status=success","-f","per_page=50","--method","GET"]
               runs=json.loads(subprocess.check_output(cmd,text=True))["workflow_runs"]
               now=time.time()
-              # Allow at least 7h for the default 24 x 15m outcome window.
-              ids=[str(x["id"]) for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=7*3600]
+              mature=[x for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=7*3600]
+              # Select newest mature scan; do not repeatedly evaluate oldest.
+              ids=[str(x["id"]) for x in mature]
+              previous=subprocess.run(["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/evaluate-archived-scan.yml/runs",
+                                      "-f","status=success","-f","per_page=100","--method","GET"],capture_output=True,text=True)
+              done=set()
+              if previous.returncode==0:
+                  for past in json.loads(previous.stdout).get("workflow_runs",[]):
+                      if past.get("id")==int(os.getenv("GITHUB_RUN_ID","0")):
+                          continue
+                      artifacts=subprocess.run(["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{past['id']}/artifacts"],
+                                               capture_output=True,text=True)
+                      if artifacts.returncode==0:
+                          for artifact in json.loads(artifacts.stdout).get("artifacts",[]):
+                              name=artifact.get("name","")
+                              if name.startswith("evaluation-report-"):
+                                  done.add(name.removeprefix("evaluation-report-"))
+              ids=[x for x in ids if x not in done]
           os.makedirs("archive",exist_ok=True)
           for run_id in ids:
               try:
@@ -55,8 +71,10 @@ jobs:
                                 "--name","latest-market-scan","--dir","archive"],capture_output=True,text=True)
               if p.returncode==0 and os.path.isfile("archive/scan-result.json") and os.path.getsize("archive/scan-result.json")>0:
                   print("Selected archived scan:",run_id)
+                  with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+                      out.write(f"scan_id={run_id}\\n")
                   sys.exit(0)
-          print("No mature scanner artifact available; skipping without fabricating results.")
+          print("No unevaluated mature scanner artifact available; skipping.")
           with open(os.environ["GITHUB_OUTPUT"],"a") as out:
               out.write("no_data=true\n")
           PY
@@ -79,7 +97,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.archive.outputs.no_data != 'true'
         with:
-          name: evaluation-report
+          name: evaluation-report-${{ steps.archive.outputs.scan_id }}
           path: |
             evaluation-input.json
             evaluation-result.json
