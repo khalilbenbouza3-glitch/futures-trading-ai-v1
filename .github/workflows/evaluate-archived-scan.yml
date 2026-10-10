@@ -67,6 +67,15 @@ jobs:
       - name: Evaluate without trading
         if: steps.archive.outputs.no_data != 'true'
         run: python evaluation.py evaluation-input.json --output evaluation-result.json
+      - name: Verify report is not falsely validated
+        if: steps.archive.outputs.no_data != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('evaluation-result.json'))
+          assert d['summary']['validated_edge'] is False
+          print('Evaluated:',d['summary']['evaluated'],'Unresolved:',d['summary']['unresolved'])
+          PY
       - uses: actions/upload-artifact@v4
         if: steps.archive.outputs.no_data != 'true'
         with:
