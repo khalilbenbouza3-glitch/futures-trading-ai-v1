@@ -127,6 +127,8 @@ async def run():
         except Exception as e: reports.append({"symbol":symbol,"status":"ERROR","error":str(e)[:300]})
     with open("historical_replay_report.json","w") as f:json.dump(reports,f,indent=2)
     print(json.dumps([{k:v for k,v in r.items() if k!="trades"} for r in reports],indent=2))
+    if any(r.get("status") != "REPLAYED" for r in reports):
+        raise SystemExit(2)
 
 if __name__=="__main__":
     asyncio.run(run())
