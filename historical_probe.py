@@ -47,6 +47,8 @@ async def main():
                      "startTime": start, "limit": 2}),
             }
     print(json.dumps({"probe_only": True, "validated_edge": False, "results": results}, indent=2))
+    if not all(check["ok"] for symbol_results in results.values() for check in symbol_results.values()):
+        raise SystemExit("Historical data probe failed: one or more required data sources unavailable")
 
 
 if __name__ == "__main__":
