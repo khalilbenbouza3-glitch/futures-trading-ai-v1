@@ -22,9 +22,10 @@ async def check(client, path, params):
             return {"ok": False, "reason": obj.get("retMsg", "exchange_error")}
         data = obj.get("result", {})
         rows = data.get("list", [])
-        return {"ok": bool(rows), "count": len(rows),
-                "first_timestamp": (rows[0].get("timestamp") or rows[0].get("fundingRateTimestamp")
-                                    or rows[0].get("startTime") or rows[0][0] if rows else None)}
+        first = rows[0] if rows else None
+        timestamp = (first.get("timestamp") or first.get("fundingRateTimestamp")
+                     or first.get("startTime")) if isinstance(first, dict) else (first[0] if first else None)
+        return {"ok": bool(rows), "count": len(rows), "first_timestamp": timestamp}
     except Exception as exc:
         return {"ok": False, "reason": type(exc).__name__}
 
