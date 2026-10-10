@@ -467,3 +467,5 @@ async def historical_replay_start(days:int=90):
 @app.get("/historical-replay/status")
 async def historical_replay_status():
     return replay_state
+
+# Historical backtest runner: read-only.
