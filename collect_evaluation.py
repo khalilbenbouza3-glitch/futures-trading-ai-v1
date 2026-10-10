@@ -45,6 +45,8 @@ async def collect(snapshot, horizon=24):
                 for x in body["candles"]
                 if int(x["start_ms"]) + INTERVAL_MS <= now_ms
             ]
+            if len(candles) != horizon or any(candles[i]["start_ms"] != first + i * INTERVAL_MS for i in range(len(candles))):
+                raise RuntimeError(f"Incomplete historical candles for {row['symbol']}: {len(candles)}/{horizon}; retry later")
             data["signals"].append(row)
             data["candles"][row["symbol"]] = sorted(candles, key=lambda x: x["start_ms"])
     return data
@@ -56,8 +58,8 @@ def main():
     p.add_argument("--output", default="evaluation-input.json")
     p.add_argument("--horizon-bars", type=int, default=24)
     args = p.parse_args()
-    if not 1 <= args.horizon_bars <= 1000:
-        p.error("horizon-bars must be between 1 and 1000")
+    if not 1 <= args.horizon_bars <= 200:
+        p.error("horizon-bars must be between 1 and 200")
     snapshot = json.loads(Path(args.snapshot).read_text())
     result = asyncio.run(collect(snapshot, args.horizon_bars))
     Path(args.output).write_text(json.dumps(result, indent=2))
