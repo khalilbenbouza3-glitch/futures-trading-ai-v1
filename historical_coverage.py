@@ -23,11 +23,11 @@ async def fetch(c, path, params):
             await asyncio.sleep(1.5 * (attempt + 1))
 
 async def series(c, symbol, kind, start, end):
-    step = INTERVALS.get(kind, 900000)
+    step = 8*3600000 if kind == "funding" else INTERVALS.get(kind, 900000)
     output = {}
     cursor = start
     while cursor < end:
-        upper = min(end - 1, cursor + step * 190)
+        upper = min(end - 1, cursor + step * 190 - 1)
         if kind == "oi":
             path = "/v5/market/open-interest"
             params = dict(category="linear", symbol=symbol, intervalTime="15min", startTime=cursor, endTime=upper, limit=200)
@@ -61,7 +61,7 @@ async def main():
                     rows = await series(c,symbol,kind,start,end)
                     timestamps = sorted(rows)
                     interval = INTERVALS.get(kind)
-                    expected = (end-start)//interval if interval else None
+                    expected = len(range(((start + interval - 1)//interval)*interval, end, interval)) if interval else None
                     missing = (expected-len(rows)) if expected is not None else None
                     report["symbols"][symbol][kind] = {
                         "count":len(rows),"expected":expected,"missing":missing,
