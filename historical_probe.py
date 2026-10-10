@@ -25,7 +25,14 @@ async def check(client, path, params):
         first = rows[0] if rows else None
         timestamp = (first.get("timestamp") or first.get("fundingRateTimestamp")
                      or first.get("startTime")) if isinstance(first, dict) else (first[0] if first else None)
-        return {"ok": bool(rows), "count": len(rows), "first_timestamp": timestamp}
+        timestamps = []
+        for row in rows:
+            value = (row.get("timestamp") or row.get("fundingRateTimestamp") or row.get("startTime")) if isinstance(row, dict) else (row[0] if row else None)
+            if value is not None:
+                timestamps.append(int(value))
+        return {"ok": bool(rows), "count": len(rows), "first_timestamp": timestamp,
+                "earliest_ms": min(timestamps) if timestamps else None,
+                "latest_ms": max(timestamps) if timestamps else None}
     except Exception as exc:
         return {"ok": False, "reason": type(exc).__name__}
 
@@ -46,8 +53,13 @@ async def main():
                     {"category": "linear", "symbol": symbol, "intervalTime": "15min",
                      "startTime": start, "endTime": start + 3600000, "limit": 2}),
             }
+    tolerance = {"kline_15m": 3600000, "funding_history": 12*3600000, "open_interest_history": 3600000}
+    for symbol_results in results.values():
+        for name, record in symbol_results.items():
+            t = record.get("earliest_ms")
+            record["near_target"] = bool(t is not None and abs(t - start) <= tolerance[name])
     print(json.dumps({"probe_only": True, "validated_edge": False, "results": results}, indent=2))
-    if not all(check["ok"] for symbol_results in results.values() for check in symbol_results.values()):
+    if not all(check["ok"] and check["near_target"] for symbol_results in results.values() for check in symbol_results.values()):
         raise SystemExit("Historical data probe failed: one or more required data sources unavailable")
 
 
