@@ -433,3 +433,37 @@ async def historical_coverage_window(symbol: str = "BTCUSDT", days_ago: int = 30
     return {"symbol":symbol,"days_ago":days_ago,"hours":hours,"start_ms":start_ms,"end_ms":end_ms,
             "results":out,"window_complete":all(v.get("complete") is True for k,v in out.items() if k!="funding"),
             "backtest_completed":False,"validated_edge":False}
+
+# Historical replay runs in the Render process without placing orders.
+replay_state={"status":"idle","read_only":True}
+replay_started=False
+
+async def replay_worker(days):
+    global replay_state
+    try:
+        import historical_replay as hr
+        hr.TEST_DAYS=days
+        reports=[]
+        for symbol in ("BTCUSDT","ETHUSDT"):
+            replay_state={"status":"running","symbol":symbol,"days":days,"completed":len(reports)}
+            result=await hr.replay(symbol)
+            reports.append(result)
+        replay_state={"status":"completed","days":days,"reports":reports,"read_only":True}
+    except Exception as e:
+        replay_state={"status":"error","error":str(e)[:400],"read_only":True}
+
+@app.post("/historical-replay/start")
+async def historical_replay_start(days:int=90):
+    global replay_started,replay_state
+    if days not in (1,7,30,90):
+        return {"error":"unsupported days"}
+    if replay_started:
+        return {"status":replay_state}
+    replay_started=True
+    replay_state={"status":"queued","days":days,"read_only":True}
+    asyncio.create_task(replay_worker(days))
+    return replay_state
+
+@app.get("/historical-replay/status")
+async def historical_replay_status():
+    return replay_state
