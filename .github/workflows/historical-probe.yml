@@ -22,7 +22,28 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install httpx==0.28.1
-      - name: Probe historical market data (read-only)
+      - name: Verify Render historical sample alignment
+        run: |
+          python - <<'PY'
+          import httpx, json, sys
+          base = 'https://futures-trading-ai-v1.onrender.com'
+          try:
+              with httpx.Client(timeout=35, follow_redirects=True) as c:
+                  health = c.get(base + '/')
+                  health.raise_for_status()
+                  results = {}
+                  for symbol in ('BTCUSDT', 'ETHUSDT'):
+                      r = c.get(base + '/historical-probe', params={'symbol': symbol, 'days_ago': 30})
+                      r.raise_for_status()
+                      results[symbol] = r.json()
+                  print(json.dumps({'health': health.status_code, 'probes': results}, indent=2))
+                  if not all(v.get('historical_sample_aligned') for v in results.values()):
+                      sys.exit('Historical OI/funding/price samples are not all aligned')
+          except httpx.HTTPError as exc:
+              sys.exit('Render historical probe unavailable: ' + str(exc))
+          PY
+      - name: Probe historical market data directly (diagnostic only)
+        if: always()
         run: |
           set -o pipefail
           python historical_probe.py | tee historical-probe-result.json
