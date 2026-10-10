@@ -318,6 +318,34 @@ def signals():
     if not freshness["fresh"]:
         return {**cache,**freshness,"actionable_signals":0,"signals":[],"status":"stale","warning":"LAST_SCAN_NOT_FRESH"}
     return {**cache,**freshness}
+@app.get("/evaluation-candles")
+async def evaluation_candles(symbol: str, start_ms: int, horizon: int = 24):
+    """Read-only historical closed 15m candles for offline signal evaluation."""
+    from fastapi import HTTPException
+    import re
+    if not re.fullmatch(r"[A-Z0-9]{2,25}USDT", symbol) or not 1 <= horizon <= 200:
+        raise HTTPException(status_code=400, detail="Invalid symbol or horizon")
+    interval_ms = 900_000
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if start_ms % interval_ms or start_ms <= 0 or start_ms + horizon * interval_ms > now_ms:
+        raise HTTPException(status_code=400, detail="Candles not fully closed or invalid start")
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            data = await get(c, "/v5/market/kline", {
+                "category": "linear", "symbol": symbol, "interval": "15",
+                "start": start_ms, "end": start_ms + (horizon - 1) * interval_ms,
+                "limit": horizon})
+        bars = sorted([
+            {"start_ms": int(x[0]), "open": float(x[1]), "high": float(x[2]),
+             "low": float(x[3]), "close": float(x[4])}
+            for x in data["list"]
+            if start_ms <= int(x[0]) < start_ms + horizon * interval_ms
+            and int(x[0]) + interval_ms <= now_ms
+        ], key=lambda x: x["start_ms"])
+        return {"symbol": symbol, "candles": bars, "count": len(bars)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Historical candles unavailable: {type(e).__name__}")
+
 @app.post("/scan")
 async def scan():
     ran=await safe_scan_once()
