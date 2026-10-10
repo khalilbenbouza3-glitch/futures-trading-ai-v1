@@ -40,7 +40,7 @@ async def replay(symbol):
     signals=[]
     candles=[{"start_ms":t,"open":float(v[1]),"high":float(v[2]),
               "low":float(v[3]),"close":float(v[4])} for t,v in sorted(data["15"].items()) if t>=start]
-    for close_time in range(start+BAR,end+1,BAR):
+    for close_time in range(start+BAR,end-BAR+1,BAR):
         # A signal becomes known only when the 15m bar closes.
         # The execution simulator enters at the NEXT bar's open.
         last_open=close_time-BAR
@@ -75,7 +75,7 @@ async def replay(symbol):
         finally:
             main.get=original_get
         if result["side"] in ("LONG","SHORT"):
-            signals.append({"symbol":symbol,"signal_time_ms":last_open,
+            signals.append({"symbol":symbol,"signal_time_ms":close_time-BAR,
                             "side":result["side"],"entry":result["entry"],
                             "stop":result["stop"],"tp1":result["tp1"],"score":result["score"]})
     trades=[simulate(sig,candles) for sig in signals]
