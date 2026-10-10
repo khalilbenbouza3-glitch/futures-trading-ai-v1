@@ -32,11 +32,16 @@ jobs:
           with httpx.Client(timeout=httpx.Timeout(620.0,connect=30.0),follow_redirects=True) as client:
               response=client.post(base+"/scan")
               response.raise_for_status()
+              scan_response=response.json()
+              if scan_response.get("scan_executed") is not True:
+                  raise SystemExit("Scan was already running; refuse to archive a duplicate snapshot")
               result=client.get(base+"/signals",timeout=30)
               result.raise_for_status()
               data=result.json()
           if not data.get("fresh") or data.get("status") not in ("ok","partial"):
               raise SystemExit("No fresh successful Render scanner snapshot; not archiving")
+          if data.get("updated_at") != scan_response.get("updated_at"):
+              raise SystemExit("Scan timestamp mismatch; refusing to archive another run")
           if not data.get("updated_at") or not isinstance(data.get("signals"),list):
               raise SystemExit("Invalid scanner payload")
           pathlib.Path("scan-result.json").write_text(json.dumps(data,indent=2))
