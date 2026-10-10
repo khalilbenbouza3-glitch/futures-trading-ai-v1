@@ -125,6 +125,9 @@ async def run():
     for symbol in ("BTCUSDT","ETHUSDT"):
         try: reports.append(await replay(symbol))
         except Exception as e: reports.append({"symbol":symbol,"status":"ERROR","error":str(e)[:300]})
+        with open("historical_replay_report.json","w") as partial:
+            json.dump(reports,partial,indent=2)
+        print(json.dumps({"finished_symbol":symbol,"status":reports[-1]["status"]}),flush=True)
     with open("historical_replay_report.json","w") as f:json.dump(reports,f,indent=2)
     print(json.dumps([{k:v for k,v in r.items() if k!="trades"} for r in reports],indent=2))
     if any(r.get("status") != "REPLAYED" for r in reports):
