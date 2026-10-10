@@ -383,9 +383,11 @@ async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
                                   "earliest_timestamp_ms":min(timestamps) if timestamps else None,
                                   "latest_timestamp_ms":max(timestamps) if timestamps else None,
                                   "target_timestamp_ms":start_ms,
-                                  "covers_target_sample":bool(timestamps) and min(timestamps) <= start_ms <= max(timestamps)}
+                                  "covers_target_sample":bool(timestamps) and min(timestamps) <= start_ms <= max(timestamps),
+                                  "near_target":bool(timestamps) and min(abs(t-start_ms) for t in timestamps) <= (12 * 3600 * 1000 if label == "funding_history" else 60 * 60 * 1000)}
             except Exception as exc:
                 results[label] = {"ok":False,"error_type":type(exc).__name__}
     return {"symbol":symbol,"days_ago":days_ago,"results":results,
             "all_available":all(v["ok"] for v in results.values()),
+            "historical_sample_aligned":all(v.get("near_target",False) for v in results.values()),
             "backtest_completed":False,"validated_edge":False}
