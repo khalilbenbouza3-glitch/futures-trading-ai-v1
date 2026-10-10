@@ -50,7 +50,8 @@ jobs:
               try:
                   os.remove("archive/scan-result.json")
               except FileNotFoundError:
-                  pass\n              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
+                  pass
+              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
                                 "--name","latest-market-scan","--dir","archive"],capture_output=True,text=True)
               if p.returncode==0 and os.path.isfile("archive/scan-result.json") and os.path.getsize("archive/scan-result.json")>0:
                   print("Selected archived scan:",run_id)
