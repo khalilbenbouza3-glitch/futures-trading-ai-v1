@@ -38,13 +38,17 @@ class EvaluationTests(unittest.TestCase):
 
     def test_gap_through_stop(self):
         result = evaluate_signal(signal(), candles((92, 94, 90, 93)), horizon_bars=1)
-        self.assertEqual(result["outcome"], "STOP")
-        self.assertEqual(result["exit"], 92)
+        self.assertEqual(result["status"], "INVALID")
+        self.assertEqual(result["reason"], "INVALID_RISK_REWARD")
 
     def test_missing_candles(self):
         rows = candles((100, 102, 98, 101), (101, 103, 99, 102))
         rows[1]["start_ms"] += 900000
         self.assertEqual(evaluate_signal(signal(), rows, horizon_bars=2)["status"], "UNRESOLVED")
+
+    def test_missing_first_entry_bar(self):
+        rows = candles((100, 102, 98, 101), (101, 103, 99, 102))
+        self.assertEqual(evaluate_signal(signal(), rows[1:], horizon_bars=1)["reason"], "MISSING_FIRST_ENTRY_BAR")
 
     def test_fee_slippage_reduce_return(self):
         bars = candles((100, 111, 99, 109))
