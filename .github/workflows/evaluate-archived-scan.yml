@@ -33,7 +33,8 @@ jobs:
           REQUESTED_RUN_ID: ${{ inputs.run_id }}
         run: |
           python - <<'PY'
-          import json, os, subprocess, sys, time\n          from datetime import datetime, timezone
+          import json, os, subprocess, sys, time
+          from datetime import datetime, timezone
           requested=os.getenv("REQUESTED_RUN_ID","").strip()
           if requested:
               ids=[requested]
@@ -46,7 +47,10 @@ jobs:
               ids=[str(x["id"]) for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=7*3600]
           os.makedirs("archive",exist_ok=True)
           for run_id in ids:
-              try:\n                  os.remove("archive/scan-result.json")\n              except FileNotFoundError:\n                  pass\n              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
+              try:
+                  os.remove("archive/scan-result.json")
+              except FileNotFoundError:
+                  pass\n              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
                                 "--name","latest-market-scan","--dir","archive"],capture_output=True,text=True)
               if p.returncode==0 and os.path.isfile("archive/scan-result.json") and os.path.getsize("archive/scan-result.json")>0:
                   print("Selected archived scan:",run_id)
