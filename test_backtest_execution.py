@@ -29,7 +29,7 @@ class ExecutionTests(unittest.TestCase):
     def test_reject_incomplete_horizon(self):
         r=simulate(sig(),bars(count=2))
         self.assertEqual(r["reason"],"INSUFFICIENT_EXIT_HORIZON")
-    def test_invalid_stop(self):
+    def test_gap_through_stop(self):\n        b=bars()\n        b[1]["open"]=95\n        b[1]["low"]=94\n        b[1]["high"]=96\n        r=simulate(sig(),b)\n        self.assertEqual(r["exit_reason"],"STOP_GAP")\n        self.assertLess(r["exit"],98)\n    def test_invalid_stop(self):
         x=sig();x["stop"]=101
         self.assertEqual(simulate(x,bars())["reason"],"INVALID_RISK")
 
