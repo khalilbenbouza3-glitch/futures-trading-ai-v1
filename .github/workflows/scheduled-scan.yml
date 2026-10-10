@@ -1,0 +1,45 @@
+name: Scheduled futures scanner
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-futures-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Scan Bybit market without placing orders
+        run: |
+          python - <<'PY'
+          import asyncio, json, pathlib
+          import main
+          async def run():
+              await main.scan_once()
+              result=main.cache
+              pathlib.Path("scan-result.json").write_text(json.dumps(result,indent=2,default=str))
+              print("status:",result.get("status"),"pairs:",result.get("pairs_scanned"),"signals:",result.get("actionable_signals"))
+              if result.get("status") not in ("ok","partial"):
+                  raise SystemExit("Market scan failed")
+          asyncio.run(run())
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: latest-market-scan
+          path: scan-result.json
+          retention-days: 2
+          if-no-files-found: warn
