@@ -393,3 +393,43 @@ async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
             "all_available":all(v["ok"] for v in results.values()),
             "historical_sample_aligned":all(v.get("near_target",False) for v in results.values()),
             "backtest_completed":False,"validated_edge":False}
+
+
+@app.get("/historical-coverage-window")
+async def historical_coverage_window(symbol: str = "BTCUSDT", days_ago: int = 30, hours: int = 6):
+    """Read-only bounded history completeness check; no trading or backtest claims."""
+    from fastapi import HTTPException
+    if symbol not in ("BTCUSDT", "ETHUSDT") or not 1 <= days_ago <= 90 or not 1 <= hours <= 12:
+        raise HTTPException(status_code=400, detail="Invalid historical window")
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    end_ms = ((now_ms - days_ago * 86400000) // 900000) * 900000
+    start_ms = end_ms - hours * 3600000
+    out = {}
+    specs = {
+        "kline_15m": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"15","start":start_ms,"end":end_ms-1,"limit":200}, 900000),
+        "open_interest_15m": ("/v5/market/open-interest", {"category":"linear","symbol":symbol,"intervalTime":"15min","startTime":start_ms,"endTime":end_ms-1,"limit":200}, 900000),
+        "kline_1h": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"60","start":start_ms,"end":end_ms-1,"limit":200}, 3600000),
+        "kline_4h": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"240","start":start_ms,"end":end_ms-1,"limit":200}, 14400000),
+        "funding": ("/v5/market/funding/history", {"category":"linear","symbol":symbol,"startTime":start_ms,"endTime":end_ms-1,"limit":200}, None)
+    }
+    async with httpx.AsyncClient(timeout=20) as client:
+        for name,(path,params,step) in specs.items():
+            try:
+                rows = (await get(client,path,params)).get("list",[])
+                stamps = set()
+                for row in rows:
+                    raw = (row.get("timestamp") or row.get("fundingRateTimestamp")) if isinstance(row,dict) else row[0]
+                    stamp = int(raw)
+                    if start_ms <= stamp < end_ms:
+                        stamps.add(stamp)
+                expected_stamps = list(range(((start_ms + step - 1)//step)*step, end_ms, step)) if step else None
+                missing = [t for t in expected_stamps if t not in stamps] if expected_stamps is not None else None
+                out[name] = {"count":len(stamps),"expected":len(expected_stamps) if expected_stamps is not None else None,
+                    "missing_count":len(missing) if missing is not None else None,
+                    "complete":not missing if missing is not None else None,
+                    "first_ms":min(stamps) if stamps else None,"last_ms":max(stamps) if stamps else None}
+            except Exception as exc:
+                out[name]={"error":type(exc).__name__,"complete":False}
+    return {"symbol":symbol,"days_ago":days_ago,"hours":hours,"start_ms":start_ms,"end_ms":end_ms,
+            "results":out,"window_complete":all(v.get("complete") is True for k,v in out.items() if k!="funding"),
+            "backtest_completed":False,"validated_edge":False}
