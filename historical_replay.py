@@ -38,6 +38,8 @@ async def replay(symbol):
         return {"symbol":symbol,"status":"BLOCKED_NO_FUNDING","coverage":checks,
                 "backtest_validated":False}
     signals=[]
+    skipped_no_funding=0
+    skipped_warmup=0
     candles=[{"start_ms":t,"open":float(v[1]),"high":float(v[2]),
               "low":float(v[3]),"close":float(v[4])} for t,v in sorted(data["15"].items()) if t>=start]
     for close_time in range(start+BAR,end-BAR+1,BAR):
@@ -53,6 +55,7 @@ async def replay(symbol):
             selected=stamps[kind][max(0,idx-219):idx+1]
             candle_sets[kind]=[data[kind][t] for t in reversed(selected)]
         if len(candle_sets)!=3:
+            skipped_warmup+=1
             continue
         oi_idx=at_or_before(stamps["oi"],last_open)
         if oi_idx<4:
@@ -60,6 +63,7 @@ async def replay(symbol):
         oi_rows=[data["oi"][t] for t in reversed(stamps["oi"][oi_idx-4:oi_idx+1])]
         fund_idx=at_or_before(stamps["funding"],close_time)
         if fund_idx<0:
+            skipped_no_funding+=1
             continue
         funding=float(data["funding"][stamps["funding"][fund_idx]]["fundingRate"])
         original_get=main.get
@@ -109,6 +113,7 @@ async def replay(symbol):
             "backtest_validated":False,"signals":len(signals),
             "closed_trades":len(closed),"rejected":len(trades)-len(closed),
             "skipped_overlapping_signals":skipped_overlapping,
+            "skipped_no_funding":skipped_no_funding,"skipped_warmup":skipped_warmup,
             "mean_net_return_ex_funding":sum(x["net_return_ex_funding"] for x in closed)/len(closed) if closed else None,
             "win_rate_ex_funding":sum(x["net_return_ex_funding"]>0 for x in closed)/len(closed) if closed else None,
             "win_rate_with_funding":sum(x["net_return_including_funding"]>0 for x in closed)/len(closed) if closed else None,
