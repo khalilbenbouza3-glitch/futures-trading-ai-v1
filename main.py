@@ -4,8 +4,8 @@ import httpx, numpy as np, pandas as pd
 from fastapi import FastAPI
 
 BASES=["https://api.bybit.com","https://api.bytick.com"]
-app=FastAPI(title="Futures Trading AI V2",version="2.9.0")
-cache={"status":"starting","version":"2.9.0","updated_at":None,"pairs_scanned":0,"signals":[]}
+app=FastAPI(title="Futures Trading AI V2",version="2.10.0")
+cache={"status":"starting","version":"2.10.0","updated_at":None,"pairs_scanned":0,"signals":[]}
 
 async def get(c,path,params=None):
     errors=[]
@@ -132,6 +132,8 @@ async def analyze(c,symbol,funding):
       "funding":fr,"open_interest":float(oi_now),"oi_change_1h_pct":round(oid*100,2),
       "rr_tp1":2.0 if side!="NEUTRAL" else None,"rr_tp2":3.0 if side!="NEUTRAL" else None}
 
+scan_lock=asyncio.Lock()
+
 async def scan_once():
     global cache
     async with httpx.AsyncClient(headers={"User-Agent":"futures-trading-ai-v2-bybit","Accept":"application/json"}) as c:
@@ -221,15 +223,22 @@ async def scan_once():
 
         failed=len(symbols)-len(out)
         status="ok" if out and failed==0 else ("partial" if out else "error")
-        cache={"status":status,"version":"2.9.0","updated_at":datetime.now(timezone.utc).isoformat(),
+        cache={"status":status,"version":"2.10.0","updated_at":datetime.now(timezone.utc).isoformat(),
                "market_universe":len(active),"eligible_pairs":len(eligible),
                "deep_scan_candidates":len(symbols),"pairs_scanned":len(out),"failed_pairs":failed,
                "actionable_signals":len(ranked),"signals":ranked[:10],
                "near_misses":near}
 
+async def safe_scan_once():
+    if scan_lock.locked():
+        return False
+    async with scan_lock:
+        await scan_once()
+    return True
+
 async def loop():
     while True:
-        try: await scan_once()
+        try: await safe_scan_once()
         except Exception as e:
             print(f"SCAN_ERROR {type(e).__name__}: {e}", flush=True)
             cache.update(status="error",error=f"{type(e).__name__}: {e}")
@@ -280,7 +289,9 @@ async def binodex_status():
                 "error":type(e).__name__}
 
 @app.get("/health")
-def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error"),"updated_at":cache.get("updated_at")}
+def health():
+    freshness=scan_freshness()
+    return {"ok":freshness["fresh"],"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error"),"updated_at":cache.get("updated_at"),**freshness}
 @app.get("/bybit-health")
 async def bybit_health():
     try:
@@ -308,4 +319,6 @@ def signals():
         return {**cache,**freshness,"actionable_signals":0,"signals":[],"status":"stale","warning":"LAST_SCAN_NOT_FRESH"}
     return {**cache,**freshness}
 @app.post("/scan")
-async def scan(): await scan_once(); return cache
+async def scan():
+    ran=await safe_scan_once()
+    return {**signals(),"scan_executed":ran,"warning":"SCAN_ALREADY_RUNNING" if not ran else None}
