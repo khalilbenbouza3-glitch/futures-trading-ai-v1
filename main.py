@@ -246,6 +246,8 @@ async def loop():
 
 @app.on_event("startup")
 async def startup(): asyncio.create_task(loop())
+@app.get("/health")
+def health(): return {"ok": True, "service": "futures-trading-ai-v2", "scan_status": cache["status"]}
 @app.get("/")
 def root(): return {"service":"futures-trading-ai-v2","mode":"SIGNAL_ONLY","status":cache["status"],"updated_at":cache["updated_at"]}
 @app.get("/binodex-symbols")
