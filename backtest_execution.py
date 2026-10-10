@@ -37,6 +37,12 @@ def simulate(signal, bars):
     exit_price, exit_time, reason = None,None,None
     for b in future[:96]:
         lo,hi = float(b["low"]),float(b["high"])
+        opening = float(b["open"])
+        if direction*(opening-stop) <= 0:
+            exit_price=opening*(1-direction*SLIPPAGE_PER_SIDE)
+            reason="STOP_GAP"
+            exit_time=int(b["start_ms"])
+            break
         hit_stop = lo<=stop if direction==1 else hi>=stop
         hit_tp = hi>=tp if direction==1 else lo<=tp
         # Ambiguous same-bar stop/TP -> conservative stop-first.
