@@ -1,7 +1,7 @@
 """Read-only historical signal replay using the SAME main.analyze scoring rules.
 Downloads a 125-day warmup for 4h EMA200, replays 90 days at closed 15m bars,
 and passes signals to the conservative execution simulator.
-No orders, no account access. Funding cashflows are not yet modeled.
+No orders, no account access. Funding cashflows are approximated at constant position notional.
 """
 import asyncio, bisect, json, time, os
 from datetime import datetime, timezone
@@ -78,7 +78,18 @@ async def replay(symbol):
             signals.append({"symbol":symbol,"signal_time_ms":close_time-BAR,
                             "side":result["side"],"entry":result["entry"],
                             "stop":result["stop"],"tp1":result["tp1"],"score":result["score"]})
-    trades=[simulate(sig,candles) for sig in signals]
+    # Only one active position per symbol: overlapping signals are skipped.
+    trades=[]
+    busy_until=-1
+    skipped_overlapping=0
+    for sig in signals:
+        if sig["signal_time_ms"] < busy_until:
+            skipped_overlapping+=1
+            continue
+        trade=simulate(sig,candles)
+        trades.append(trade)
+        if trade["status"]=="closed":
+            busy_until=trade["exit_time_ms"]+BAR
     funding_events = [(t,float(data["funding"][t]["fundingRate"])) for t in stamps["funding"]]
     for trade in trades:
         if trade["status"]!="closed":
@@ -97,6 +108,7 @@ async def replay(symbol):
             "funding_assumption":"constant_notional_approximation",
             "backtest_validated":False,"signals":len(signals),
             "closed_trades":len(closed),"rejected":len(trades)-len(closed),
+            "skipped_overlapping_signals":skipped_overlapping,
             "mean_net_return_ex_funding":sum(x["net_return_ex_funding"] for x in closed)/len(closed) if closed else None,
             "win_rate_ex_funding":sum(x["net_return_ex_funding"]>0 for x in closed)/len(closed) if closed else None,
             "win_rate_with_funding":sum(x["net_return_including_funding"]>0 for x in closed)/len(closed) if closed else None,
