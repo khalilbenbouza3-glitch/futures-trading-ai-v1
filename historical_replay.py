@@ -79,14 +79,28 @@ async def replay(symbol):
                             "side":result["side"],"entry":result["entry"],
                             "stop":result["stop"],"tp1":result["tp1"],"score":result["score"]})
     trades=[simulate(sig,candles) for sig in signals]
+    funding_events = [(t,float(data["funding"][t]["fundingRate"])) for t in stamps["funding"]]
+    for trade in trades:
+        if trade["status"]!="closed":
+            continue
+        opened = trade["signal_time_ms"] + BAR
+        ended = trade["exit_time_ms"] + BAR
+        direction = 1 if trade["side"]=="LONG" else -1
+        funding_cost = direction*sum(rate for t,rate in funding_events if opened < t <= ended)
+        trade["funding_return_cost"] = funding_cost
+        trade["net_return_including_funding"] = trade["net_return_ex_funding"] - funding_cost
+        trade["funding_included"] = True
     closed=[x for x in trades if x["status"]=="closed"]
     return {"symbol":symbol,"status":"REPLAYED","coverage":checks,
             "strategy_rules":"main.analyze","read_only":True,
-            "funding_signal_used":True,"funding_cashflows_included":False,
+            "funding_signal_used":True,"funding_cashflows_included":True,
+            "funding_assumption":"constant_notional_approximation",
             "backtest_validated":False,"signals":len(signals),
             "closed_trades":len(closed),"rejected":len(trades)-len(closed),
             "mean_net_return_ex_funding":sum(x["net_return_ex_funding"] for x in closed)/len(closed) if closed else None,
             "win_rate_ex_funding":sum(x["net_return_ex_funding"]>0 for x in closed)/len(closed) if closed else None,
+            "win_rate_with_funding":sum(x["net_return_including_funding"]>0 for x in closed)/len(closed) if closed else None,
+            "mean_net_return_with_funding":sum(x["net_return_including_funding"] for x in closed)/len(closed) if closed else None,
             "trades":trades}
 
 async def run():
