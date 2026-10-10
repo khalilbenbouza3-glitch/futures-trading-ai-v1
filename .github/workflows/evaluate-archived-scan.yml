@@ -33,7 +33,7 @@ jobs:
           REQUESTED_RUN_ID: ${{ inputs.run_id }}
         run: |
           python - <<'PY'
-          import json, os, subprocess, sys, time
+          import json, os, subprocess, sys, time\n          from datetime import datetime, timezone
           requested=os.getenv("REQUESTED_RUN_ID","").strip()
           if requested:
               ids=[requested]
@@ -43,12 +43,12 @@ jobs:
               runs=json.loads(subprocess.check_output(cmd,text=True))["workflow_runs"]
               now=time.time()
               # Allow at least 7h for the default 24 x 15m outcome window.
-              ids=[str(x["id"]) for x in runs if now-time.mktime(time.strptime(x["created_at"],"%Y-%m-%dT%H:%M:%SZ"))>=7*3600]
+              ids=[str(x["id"]) for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=7*3600]
           os.makedirs("archive",exist_ok=True)
           for run_id in ids:
-              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
+              try:\n                  os.remove("archive/scan-result.json")\n              except FileNotFoundError:\n                  pass\n              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
                                 "--name","latest-market-scan","--dir","archive"],capture_output=True,text=True)
-              if p.returncode==0 and os.path.getsize("archive/scan-result.json")>0:
+              if p.returncode==0 and os.path.isfile("archive/scan-result.json") and os.path.getsize("archive/scan-result.json")>0:
                   print("Selected archived scan:",run_id)
                   sys.exit(0)
           print("No mature scanner artifact available; skipping without fabricating results.")
