@@ -1,6 +1,10 @@
 name: Probe historical Bybit data
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'historical_probe.py'
+      - '.github/workflows/historical-probe.yml'
 
 permissions:
   contents: read
