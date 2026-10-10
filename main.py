@@ -282,7 +282,22 @@ async def bybit_health():
     except Exception as e:
         return {"ok":False,"provider":"bybit","error":str(e)[:250]}
 
+def scan_freshness():
+    stamp=cache.get("updated_at")
+    if not stamp:
+        return {"fresh":False,"age_seconds":None,"max_age_seconds":max(900,2*int(os.getenv("SCAN_SECONDS","300")))}
+    try:
+        age=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(stamp.replace("Z","+00:00"))).total_seconds())
+        max_age=max(900,2*int(os.getenv("SCAN_SECONDS","300")))
+        return {"fresh":age<=max_age and cache.get("status")=="ok","age_seconds":round(age),"max_age_seconds":max_age}
+    except (ValueError,TypeError):
+        return {"fresh":False,"age_seconds":None,"max_age_seconds":900}
+
 @app.get("/signals")
-def signals(): return cache
+def signals():
+    freshness=scan_freshness()
+    if not freshness["fresh"]:
+        return {**cache,**freshness,"actionable_signals":0,"signals":[],"status":"stale","warning":"LAST_SCAN_NOT_FRESH"}
+    return {**cache,**freshness}
 @app.post("/scan")
 async def scan(): await scan_once(); return cache
