@@ -32,10 +32,12 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
     stamp = timestamp_ms(signal["updated_at"])
     stop, target = float(signal["stop"]), float(signal["tp1"])
     ordered = sorted(candles, key=lambda x: int(x["start_ms"]))
-    future = [x for x in ordered if int(x["start_ms"]) > stamp]
+    future = [x for x in ordered if int(x["start_ms"]) >= ((stamp // interval_ms) + 1) * interval_ms]
     if len(future) < horizon_bars:
         return {"status": "UNRESOLVED", "reason": "INSUFFICIENT_FUTURE_BARS"}
     future = future[:horizon_bars]
+    if int(future[0]["start_ms"]) != ((stamp // interval_ms) + 1) * interval_ms:
+        return {"status": "UNRESOLVED", "reason": "MISSING_FIRST_ENTRY_BAR"}
     for i, bar in enumerate(future):
         start = int(bar["start_ms"])
         if i and start != int(future[i-1]["start_ms"]) + interval_ms:
@@ -45,6 +47,9 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
         return {"status": "INVALID", "reason": "INVALID_PRICES"}
     if direction * (target - entry) <= 0 or direction * (entry - stop) <= 0:
         return {"status": "INVALID", "reason": "INVALID_RISK_REWARD"}
+    # A gap through the intended stop at entry invalidates the proposed setup.
+    if direction * (entry - stop) <= 0:
+        return {"status": "INVALID", "reason": "STOP_CROSSED_BEFORE_ENTRY"}
     entry_exec = entry * (1 + direction * slippage_bps / 10000)
     outcome = "TIMEOUT"
     exit_price = float(future[-1]["close"])
@@ -72,6 +77,8 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
     gross = direction * (exit_exec / entry_exec - 1)
     net = gross - 2 * fee_bps / 10000
     risk = abs(entry_exec - stop) / entry_exec
+    if risk <= 0:
+        return {"status": "INVALID", "reason": "ZERO_RISK"}
     return {"status": "EVALUATED", "outcome": outcome,
             "entry": entry, "exit": exit_price, "net_return_pct": round(net * 100, 5),
             "net_r": round(net / risk, 5), "mfe_pct": round(mfe * 100, 5),
