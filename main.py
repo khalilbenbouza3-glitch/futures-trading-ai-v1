@@ -365,7 +365,7 @@ async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
     probes = {
         "kline_15m": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"15","start":start_ms,"limit":2}),
         "funding_history": ("/v5/market/funding/history", {"category":"linear","symbol":symbol,"endTime":start_ms,"limit":2}),
-        "open_interest_history": ("/v5/market/open-interest", {"category":"linear","symbol":symbol,"intervalTime":"15min","startTime":start_ms,"limit":2}),
+        "open_interest_history": ("/v5/market/open-interest", {"category":"linear","symbol":symbol,"intervalTime":"15min","startTime":start_ms,"endTime":start_ms + 3600000,"limit":2}),
     }
     results = {}
     async with httpx.AsyncClient(timeout=20) as client:
