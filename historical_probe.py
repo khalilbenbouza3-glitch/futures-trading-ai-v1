@@ -41,10 +41,10 @@ async def main():
                     {"category": "linear", "symbol": symbol, "interval": "15",
                      "start": start, "limit": 2}),
                 "funding_history": await check(client, "/v5/market/funding/history",
-                    {"category": "linear", "symbol": symbol, "startTime": start, "limit": 2}),
+                    {"category": "linear", "symbol": symbol, "endTime": start, "limit": 2}),
                 "open_interest_history": await check(client, "/v5/market/open-interest",
                     {"category": "linear", "symbol": symbol, "intervalTime": "15min",
-                     "startTime": start, "limit": 2}),
+                     "startTime": start, "endTime": start + 3600000, "limit": 2}),
             }
     print(json.dumps({"probe_only": True, "validated_edge": False, "results": results}, indent=2))
     if not all(check["ok"] for symbol_results in results.values() for check in symbol_results.values()):
