@@ -3,36 +3,67 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        description: 'Scheduled scanner workflow run ID whose scan-result.json artifact will be evaluated'
-        required: true
+        description: 'Optional scheduled scanner workflow run ID'
+        required: false
         type: string
+  schedule:
+    - cron: '17 * * * *'
 
 permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: archived-scan-evaluation
+  cancel-in-progress: false
+
 jobs:
   evaluate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install httpx==0.28.1
-      - name: Retrieve archived scanner output
+      - name: Find mature archived scan and download its artifact
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.run_id }}
+          REQUESTED_RUN_ID: ${{ inputs.run_id }}
         run: |
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name latest-market-scan --dir archive
-          test -s archive/scan-result.json
+          python - <<'PY'
+          import json, os, subprocess, sys, time
+          requested=os.getenv("REQUESTED_RUN_ID","").strip()
+          if requested:
+              ids=[requested]
+          else:
+              cmd=["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/scheduled-scan.yml/runs",
+                   "-f","status=success","-f","per_page=50","--method","GET"]
+              runs=json.loads(subprocess.check_output(cmd,text=True))["workflow_runs"]
+              now=time.time()
+              # Allow at least 7h for the default 24 x 15m outcome window.
+              ids=[str(x["id"]) for x in runs if now-time.mktime(time.strptime(x["created_at"],"%Y-%m-%dT%H:%M:%SZ"))>=7*3600]
+          os.makedirs("archive",exist_ok=True)
+          for run_id in ids:
+              p=subprocess.run(["gh","run","download",run_id,"--repo",os.environ["GITHUB_REPOSITORY"],
+                                "--name","latest-market-scan","--dir","archive"],capture_output=True,text=True)
+              if p.returncode==0 and os.path.getsize("archive/scan-result.json")>0:
+                  print("Selected archived scan:",run_id)
+                  sys.exit(0)
+          print("No mature scanner artifact available; skipping without fabricating results.")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+              out.write("no_data=true\n")
+          PY
+        id: archive
       - name: Fetch matured closed Bybit candles
+        if: steps.archive.outputs.no_data != 'true'
         run: python collect_evaluation.py archive/scan-result.json --output evaluation-input.json
       - name: Evaluate without trading
+        if: steps.archive.outputs.no_data != 'true'
         run: python evaluation.py evaluation-input.json --output evaluation-result.json
       - uses: actions/upload-artifact@v4
+        if: steps.archive.outputs.no_data != 'true'
         with:
           name: evaluation-report
           path: |
