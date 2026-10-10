@@ -27,7 +27,11 @@ def simulate(signal, bars):
                     key=lambda b:int(b["start_ms"]))
     if not future or int(future[0]["start_ms"]) != int(signal["signal_time_ms"])+BAR_MS:
         return {"status":"rejected","reason":"NEXT_BAR_MISSING"}
-    # Gap through a protective stop: fill at the adverse opening price, not the stale stop.\n    first_open = float(future[0]["open"])\n    if direction*(first_open-stop) <= 0:\n        return {"status":"rejected","reason":"STOP_CROSSED_AT_ENTRY"}\n    actual_entry = first_open*(1+direction*SLIPPAGE_PER_SIDE)
+    # Gap through a protective stop: fill at the adverse opening price, not the stale stop.
+    first_open = float(future[0]["open"])
+    if direction*(first_open-stop) <= 0:
+        return {"status":"rejected","reason":"STOP_CROSSED_AT_ENTRY"}
+    actual_entry = first_open*(1+direction*SLIPPAGE_PER_SIDE)
     if direction*(actual_entry-stop) <= 0:
         return {"status":"rejected","reason":"STOP_CROSSED_AT_ENTRY"}
     exit_price, exit_time, reason = None,None,None
