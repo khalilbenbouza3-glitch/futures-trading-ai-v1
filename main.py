@@ -350,3 +350,30 @@ async def evaluation_candles(symbol: str, start_ms: int, horizon: int = 24):
 async def scan():
     ran=await safe_scan_once()
     return {**signals(),"scan_executed":ran,"warning":"SCAN_ALREADY_RUNNING" if not ran else None}
+
+@app.get("/historical-probe")
+async def historical_probe(symbol: str = "BTCUSDT", days_ago: int = 30):
+    """Read-only availability check; no orders and no performance claims."""
+    from fastapi import HTTPException
+    import re
+    if symbol not in ("BTCUSDT", "ETHUSDT") or not 1 <= days_ago <= 90:
+        raise HTTPException(status_code=400, detail="Invalid probe arguments")
+    from datetime import timedelta
+    start_ms = int((datetime.now(timezone.utc) - timedelta(days=days_ago)).timestamp() * 1000)
+    probes = {
+        "kline_15m": ("/v5/market/kline", {"category":"linear","symbol":symbol,"interval":"15","start":start_ms,"limit":2}),
+        "funding_history": ("/v5/market/funding/history", {"category":"linear","symbol":symbol,"startTime":start_ms,"limit":2}),
+        "open_interest_history": ("/v5/market/open-interest", {"category":"linear","symbol":symbol,"intervalTime":"15min","startTime":start_ms,"limit":2}),
+    }
+    results = {}
+    async with httpx.AsyncClient(timeout=20) as client:
+        for label, (path, params) in probes.items():
+            try:
+                payload = await get(client, path, params)
+                rows = payload.get("list", [])
+                results[label] = {"ok":bool(rows),"count":len(rows)}
+            except Exception as exc:
+                results[label] = {"ok":False,"error_type":type(exc).__name__}
+    return {"symbol":symbol,"days_ago":days_ago,"results":results,
+            "all_available":all(v["ok"] for v in results.values()),
+            "backtest_completed":False,"validated_edge":False}
