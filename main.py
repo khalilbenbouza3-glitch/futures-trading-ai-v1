@@ -272,7 +272,16 @@ async def binodex_status():
                 "error":type(e).__name__}
 
 @app.get("/health")
-def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error")}
+def health(): return {"ok":True,"scanner":cache["status"],"version":cache["version"],"pairs_scanned":cache["pairs_scanned"],"error":cache.get("error"),"updated_at":cache.get("updated_at")}
+@app.get("/bybit-health")
+async def bybit_health():
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            result=await get(c,"/v5/market/time")
+        return {"ok":True,"provider":"bybit","server_time":result.get("timeSecond")}
+    except Exception as e:
+        return {"ok":False,"provider":"bybit","error":str(e)[:250]}
+
 @app.get("/signals")
 def signals(): return cache
 @app.post("/scan")
