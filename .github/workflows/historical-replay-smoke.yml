@@ -1,0 +1,28 @@
+name: Historical replay smoke test
+on:
+  push:
+    paths:
+      - '.github/workflows/historical-replay-smoke.yml'
+  workflow_dispatch:
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      BACKTEST_DAYS: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Run read-only one-day historical replay
+        run: python historical_replay.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-replay-report
+          path: historical_replay_report.json
+          if-no-files-found: ignore
