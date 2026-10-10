@@ -20,26 +20,32 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: pip
-      - run: pip install -r requirements.txt
-      - name: Scan Bybit market without placing orders
+      - run: pip install httpx==0.28.1
+      - name: Request scan from Render and archive fresh result
+        env:
+          SCANNER_URL: https://futures-trading-ai-v1.onrender.com
         run: |
           python - <<'PY'
-          import asyncio, json, pathlib
-          import main
-          async def run():
-              await main.scan_once()
-              result=main.cache
-              pathlib.Path("scan-result.json").write_text(json.dumps(result,indent=2,default=str))
-              print("status:",result.get("status"),"pairs:",result.get("pairs_scanned"),"signals:",result.get("actionable_signals"))
-              if result.get("status") not in ("ok","partial"):
-                  raise SystemExit("Market scan failed")
-          asyncio.run(run())
+          import json, os, pathlib, time
+          import httpx
+          base=os.environ["SCANNER_URL"]
+          with httpx.Client(timeout=httpx.Timeout(620.0,connect=30.0),follow_redirects=True) as client:
+              response=client.post(base+"/scan")
+              response.raise_for_status()
+              result=client.get(base+"/signals",timeout=30)
+              result.raise_for_status()
+              data=result.json()
+          if not data.get("fresh") or data.get("status") not in ("ok","partial"):
+              raise SystemExit("No fresh successful Render scanner snapshot; not archiving")
+          if not data.get("updated_at") or not isinstance(data.get("signals"),list):
+              raise SystemExit("Invalid scanner payload")
+          pathlib.Path("scan-result.json").write_text(json.dumps(data,indent=2))
+          print("Archived Render scan",data["updated_at"],"signals",len(data["signals"]))
           PY
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: latest-market-scan
           path: scan-result.json
           retention-days: 2
-          if-no-files-found: warn
+          if-no-files-found: error
