@@ -25,16 +25,28 @@ jobs:
       - name: Verify Render historical sample alignment
         run: |
           python - <<'PY'
-          import httpx, json, sys
+          import httpx, json, sys, time
           base = 'https://futures-trading-ai-v1.onrender.com'
           try:
               with httpx.Client(timeout=35, follow_redirects=True) as c:
-                  health = c.get(base + '/')
-                  health.raise_for_status()
+                  def fetch(path, params=None):
+                      for attempt in range(5):
+                          try:
+                              response = c.get(base + path, params=params)
+                              if response.status_code in (502, 503, 504) and attempt < 4:
+                                  time.sleep(8 * (attempt + 1))
+                                  continue
+                              response.raise_for_status()
+                              return response
+                          except (httpx.ConnectError, httpx.ReadTimeout):
+                              if attempt == 4:
+                                  raise
+                              time.sleep(8 * (attempt + 1))
+                      raise RuntimeError('Render unavailable after retries')
+                  health = fetch('/health')
                   results = {}
                   for symbol in ('BTCUSDT', 'ETHUSDT'):
-                      r = c.get(base + '/historical-probe', params={'symbol': symbol, 'days_ago': 30})
-                      r.raise_for_status()
+                      r = fetch('/historical-probe', params={'symbol': symbol, 'days_ago': 30})
                       results[symbol] = r.json()
                   print(json.dumps({'health': health.status_code, 'probes': results}, indent=2))
                   if not all(v.get('historical_sample_aligned') for v in results.values()):
