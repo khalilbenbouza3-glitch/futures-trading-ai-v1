@@ -1,0 +1,51 @@
+name: Render Uptime Monitor
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  uptime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - name: Check Render availability with retries
+        env:
+          URL: https://futures-trading-ai-v1.onrender.com/health
+        run: |
+          python - <<'PY'
+          import os, time, json, urllib.request, urllib.error, datetime, sys
+          url = os.environ["URL"]
+          attempts = []
+          for i in range(5):
+              started = time.monotonic()
+              try:
+                  with urllib.request.urlopen(url, timeout=35) as response:
+                      status = response.status
+                      body = json.loads(response.read())
+                  success = status == 200 and body.get("ok") is True
+                  detail = body
+              except Exception as exc:
+                  status = getattr(exc, "code", None)
+                  success = False
+                  detail = {"error": type(exc).__name__, "message": str(exc)[:250]}
+              attempts.append({"at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "status": status, "success": success, "latency_seconds": round(time.monotonic()-started,2), "detail": detail})
+              print(json.dumps(attempts[-1]), flush=True)
+              if success:
+                  break
+              if i < 4:
+                  time.sleep(12)
+          with open("uptime-result.json","w") as f:
+              json.dump({"endpoint":url,"healthy":attempts[-1]["success"],"attempts":attempts},f,indent=2)
+          if not attempts[-1]["success"]:
+              sys.exit("Render health check failed after five attempts")
+          PY
+      - name: Preserve uptime diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-uptime-${{ github.run_id }}
+          path: uptime-result.json
+          if-no-files-found: warn
+          retention-days: 30
