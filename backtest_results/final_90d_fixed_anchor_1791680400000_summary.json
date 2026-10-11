@@ -1,0 +1,80 @@
+{
+  "status": "COMPLETED",
+  "read_only": true,
+  "anchor_ms": 1791680400000,
+  "window_start_ms": 1783818000000,
+  "window_end_ms": 1791594000000,
+  "window_days": 90,
+  "window_note": "Exactly contiguous 90-day replay ending one day before the fixed anchor.",
+  "data_validation": {
+    "chunk_status_required": "REPLAYED",
+    "missing_15m_1h_4h_oi_required": 0,
+    "skipped_no_funding_required": 0,
+    "skipped_warmup_required": 0,
+    "fixed_anchor_required": true,
+    "contiguous_chunks_required": true,
+    "all_checks_passed": true
+  },
+  "execution_assumptions": {
+    "strategy_rules": "main.analyze",
+    "entry": "next 15m bar open",
+    "fee_per_side": 0.0006,
+    "slippage_per_side": 0.0002,
+    "same_bar_stop_tp_collision": "stop_first",
+    "max_holding": "24h",
+    "funding": "historical funding rate with constant-notional approximation",
+    "round_trip_fee_plus_slippage_before_funding": 0.0016
+  },
+  "BTCUSDT": {
+    "github_run_id": 38101153938,
+    "artifact_id": 11687958487,
+    "closed_trades": 40,
+    "wins": 15,
+    "losses": 25,
+    "win_rate": 0.375,
+    "signals": 118,
+    "skipped_overlapping_signals": 78,
+    "mean_net_return_with_funding": -0.0006392486144938694,
+    "arithmetic_sum_net_returns": -0.02556994457975478,
+    "compounded_full_notional_sequential_illustration": -0.026367100851079406,
+    "max_drawdown_full_notional_sequential_illustration": 0.0703454222229466,
+    "profit_factor_return_units": 0.8309866082100501,
+    "exit_reasons": {"STOP": 25, "TP1": 15}
+  },
+  "ETHUSDT": {
+    "github_run_id": 38100886517,
+    "artifact_id": 11687753334,
+    "closed_trades": 59,
+    "wins": 20,
+    "losses": 39,
+    "win_rate": 0.3389830508474576,
+    "signals": 129,
+    "skipped_overlapping_signals": 70,
+    "mean_net_return_with_funding": -0.0014732515239267027,
+    "arithmetic_sum_net_returns": -0.08692183991167546,
+    "compounded_full_notional_sequential_illustration": -0.0857927277137025,
+    "max_drawdown_full_notional_sequential_illustration": 0.10347520244988717,
+    "profit_factor_return_units": 0.7151424035601955,
+    "exit_reasons": {"STOP": 39, "TP1": 20}
+  },
+  "combined_trade_distribution": {
+    "closed_trades": 99,
+    "wins": 35,
+    "losses": 64,
+    "win_rate": 0.35353535353535354,
+    "signals": 247,
+    "skipped_overlapping_signals": 148,
+    "mean_net_return_with_funding": -0.0011362806514285883,
+    "arithmetic_sum_net_returns": -0.11249178449143024,
+    "profit_factor_return_units": 0.7535403503295587,
+    "exit_reasons": {"STOP": 64, "TP1": 35},
+    "portfolio_return": null,
+    "portfolio_return_reason": "BTC and ETH positions can overlap and no cross-symbol capital allocation rule is defined, so no combined portfolio compounding is claimed."
+  },
+  "interpretation": {
+    "historical_replay_completed": true,
+    "strategy_profitable_in_this_test": false,
+    "production_validated": false,
+    "note": "The historical execution completed and passed the stated data-integrity checks. This is not live-trading validation, and the engine's conservative execution/funding assumptions remain part of the result."
+  }
+}
