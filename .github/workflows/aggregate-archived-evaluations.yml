@@ -4,8 +4,11 @@ on:
   schedule:
     - cron: '45 23 * * *'
 permissions:
-  contents: read
+  contents: write
   actions: read
+concurrency:
+  group: persistent-research-ledger
+  cancel-in-progress: false
 jobs:
   aggregate:
     runs-on: ubuntu-latest
@@ -59,6 +62,18 @@ jobs:
               json.dump(result,f,indent=2)
           print(json.dumps(result,indent=2))
           PY
+      - name: Persist historical evaluations in repository
+        run: |
+          python archive_evaluation_history.py evaluation-archives/*/evaluation-result.json
+          if ! git diff --quiet -- research-history/evaluations.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add research-history/evaluations.json
+            git commit -m "Archive evaluated scan results"
+            git push origin HEAD:main
+          else
+            echo "No new archived scan results."
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: aggregate-research-summary
