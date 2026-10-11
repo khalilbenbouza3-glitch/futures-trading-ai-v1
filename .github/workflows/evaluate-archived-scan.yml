@@ -40,7 +40,7 @@ jobs:
               ids=[requested]
           else:
               cmd=["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/scheduled-scan.yml/runs",
-                   "-f","status=success","-f","per_page=50","--method","GET"]
+                   "-f","status=success","-f","per_page=100","--method","GET"]
               runs=json.loads(subprocess.check_output(cmd,text=True))["workflow_runs"]
               now=time.time()
               mature=[x for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=6*3600]
