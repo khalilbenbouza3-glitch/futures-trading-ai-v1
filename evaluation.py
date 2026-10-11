@@ -53,6 +53,7 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
     entry_exec = entry * (1 + direction * slippage_bps / 10000)
     outcome = "TIMEOUT"
     exit_price = float(future[-1]["close"])
+    exit_bar_start_ms = int(future[-1]["start_ms"])
     mfe = mae = 0.0
     for bar in future:
         high, low = float(bar["high"]), float(bar["low"])
@@ -64,14 +65,17 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
         opening = float(bar["open"])
         if (direction == 1 and opening <= stop) or (direction == -1 and opening >= stop):
             outcome, exit_price = "STOP", opening
+            exit_bar_start_ms = int(bar["start_ms"])
             break
         stop_hit = low <= stop if direction == 1 else high >= stop
         target_hit = high >= target if direction == 1 else low <= target
         if stop_hit:
             outcome, exit_price = "STOP", stop
+            exit_bar_start_ms = int(bar["start_ms"])
             break
         if target_hit:
             outcome, exit_price = "TARGET", target
+            exit_bar_start_ms = int(bar["start_ms"])
             break
     exit_exec = exit_price * (1 - direction * slippage_bps / 10000)
     gross = direction * (exit_exec / entry_exec - 1)
@@ -80,6 +84,8 @@ def evaluate_signal(signal, candles, *, fee_bps=6.0, slippage_bps=3.0,
     if risk <= 0:
         return {"status": "INVALID", "reason": "ZERO_RISK"}
     return {"status": "EVALUATED", "outcome": outcome,
+            "signal_at_ms": stamp, "entry_bar_start_ms": int(future[0]["start_ms"]),
+            "exit_bar_start_ms": exit_bar_start_ms, "side": side,
             "entry": entry, "exit": exit_price, "net_return_pct": round(net * 100, 5),
             "net_r": round(net / risk, 5), "mfe_pct": round(mfe * 100, 5),
             "mae_pct": round(mae * 100, 5), "bars_available": len(future)}
