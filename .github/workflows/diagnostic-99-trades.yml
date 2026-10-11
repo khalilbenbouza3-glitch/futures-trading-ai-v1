@@ -1,0 +1,62 @@
+name: Diagnostic 99 executed trades
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnostic-99-trades.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: BTCUSDT
+            base: https://futures-backtest-btc-final.onrender.com
+          - symbol: ETHUSDT
+            base: https://futures-backtest-chunks.onrender.com
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for diagnostics API
+        env:
+          BASE: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          version=""
+          for i in $(seq 1 90); do
+            version=$(curl --retry 2 --retry-all-errors -fsS "$BASE/openapi.json" 2>/dev/null | jq -r '.info.version // empty' || true)
+            echo "api_version=${version:-unavailable} poll=$i"
+            [ "$version" = "1.3" ] && break
+            sleep 5
+          done
+          test "$version" = "1.3"
+
+      - name: Reconstruct executed-trade features
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST "$BASE/diagnose/start?symbol=$SYMBOL" > start.json
+          cat start.json
+          test "$(jq -r '.status' start.json)" = "running"
+          for i in $(seq 1 80); do
+            sleep 10
+            curl --retry 5 --retry-all-errors -fsS "$BASE/diagnose/status" > status.json
+            st=$(jq -r '.status' status.json)
+            echo "$SYMBOL poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              test "$(jq -r '.report.symbol' status.json)" = "$SYMBOL"
+              count=$(jq -r '.report.count' status.json)
+              if [ "$SYMBOL" = "BTCUSDT" ]; then test "$count" = "40"; else test "$count" = "59"; fi
+              jq '.report' status.json > "${SYMBOL}_features.json"
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat status.json; exit 10; fi
+          done
+          exit 11
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.symbol }}-executed-trade-features
+          path: ${{ matrix.symbol }}_features.json
