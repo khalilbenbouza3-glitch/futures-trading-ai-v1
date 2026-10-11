@@ -1,4 +1,78 @@
 {
-  "schema_version": 1,
-  "scans": {}
+  "scans": {
+    "38081830927": [
+      {
+        "entry": 0.8571,
+        "exit": 0.8829470899451013,
+        "net_r": 1.47423,
+        "net_return_pct": 2.83385,
+        "outcome": "TARGET",
+        "score": 77.5,
+        "symbol": "APTUSDT"
+      }
+    ],
+    "38081843966": [
+      {
+        "entry": 0.9281,
+        "exit": 0.9511510271082816,
+        "net_r": 1.24234,
+        "net_return_pct": 2.30221,
+        "outcome": "TARGET",
+        "score": 78.6,
+        "symbol": "AEROUSDT"
+      },
+      {
+        "entry": 0.8571,
+        "exit": 0.8829470899451013,
+        "net_r": 1.47423,
+        "net_return_pct": 2.83385,
+        "outcome": "TARGET",
+        "score": 77.5,
+        "symbol": "APTUSDT"
+      }
+    ],
+    "38088870357": [
+      {
+        "entry": 0.5752,
+        "exit": 0.6048345851845786,
+        "net_r": 1.53794,
+        "net_return_pct": 4.96898,
+        "outcome": "TARGET",
+        "score": 80.4,
+        "symbol": "TIAUSDT"
+      }
+    ],
+    "38092578040": [
+      {
+        "entry": 0.10319,
+        "exit": 0.11383718272490842,
+        "net_r": 2.43807,
+        "net_return_pct": 10.13187,
+        "outcome": "TARGET",
+        "score": 73.3,
+        "symbol": "STRKUSDT"
+      }
+    ],
+    "38094366339": [
+      {
+        "entry": 0.9452,
+        "exit": 0.9336308835289321,
+        "net_r": -1.11935,
+        "net_return_pct": -1.40323,
+        "outcome": "STOP",
+        "score": 88.0,
+        "symbol": "AEROUSDT"
+      },
+      {
+        "entry": 0.06847,
+        "exit": 0.0661454074806182,
+        "net_r": -1.04351,
+        "net_return_pct": -3.573,
+        "outcome": "STOP",
+        "score": 80.7,
+        "symbol": "CHIPUSDT"
+      }
+    ]
+  },
+  "schema_version": 1
 }
