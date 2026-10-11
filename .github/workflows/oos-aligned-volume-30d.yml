@@ -1,0 +1,127 @@
+name: OOS aligned-volume 30d validation
+on:
+  push:
+    paths:
+      - '.github/workflows/oos-aligned-volume-30d.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: BTCUSDT
+            base: https://futures-backtest-btc-final.onrender.com
+          - symbol: ETHUSDT
+            base: https://futures-backtest-chunks.onrender.com
+    runs-on: ubuntu-latest
+    env:
+      ANCHOR_MS: 1791680400000
+      END_DAYS_AGO: 91
+      DAYS: 30
+      MAX_ALIGNED_VOLUME: 0.60
+    steps:
+      - name: Wait for experiment API
+        env:
+          BASE: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          version=""
+          for i in $(seq 1 100); do
+            version=$(curl --retry 2 --retry-all-errors -fsS "$BASE/openapi.json" 2>/dev/null | jq -r '.info.version // empty' || true)
+            echo "api_version=${version:-unavailable} poll=$i"
+            [ "$version" = "1.4" ] && break
+            sleep 5
+          done
+          test "$version" = "1.4"
+
+      - name: Run baseline older 30d
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST \
+            "$BASE/chunk/start?symbol=$SYMBOL&days=$DAYS&end_days_ago=$END_DAYS_AGO&initial_busy_until_ms=-1&anchor_ms=$ANCHOR_MS" > start.json
+          test "$(jq -r '.status' start.json)" = "running"
+          for i in $(seq 1 100); do
+            sleep 15
+            curl --retry 5 --retry-all-errors -fsS "$BASE/chunk/status" > status.json
+            st=$(jq -r '.status' status.json)
+            echo "$SYMBOL baseline poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              cp status.json baseline.json
+              jq -e '.report.status == "REPLAYED"' baseline.json >/dev/null
+              jq -e '([.report.coverage[] | .missing] | add) == 0' baseline.json >/dev/null
+              jq -e '.report.skipped_no_funding == 0 and .report.skipped_warmup == 0' baseline.json >/dev/null
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat status.json; exit 10; fi
+          done
+          exit 11
+
+      - name: Run aligned-volume filtered older 30d
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST \
+            "$BASE/experiment/start?symbol=$SYMBOL&days=$DAYS&end_days_ago=$END_DAYS_AGO&initial_busy_until_ms=-1&anchor_ms=$ANCHOR_MS&max_aligned_volume=$MAX_ALIGNED_VOLUME" > exp_start.json
+          test "$(jq -r '.status' exp_start.json)" = "running"
+          for i in $(seq 1 100); do
+            sleep 15
+            curl --retry 5 --retry-all-errors -fsS "$BASE/experiment/status" > exp_status.json
+            st=$(jq -r '.status' exp_status.json)
+            echo "$SYMBOL filtered poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              cp exp_status.json filtered.json
+              jq -e '.report.status == "REPLAYED"' filtered.json >/dev/null
+              jq -e '([.report.coverage[] | .missing] | add) == 0' filtered.json >/dev/null
+              jq -e '.report.skipped_no_funding == 0 and .report.skipped_warmup == 0' filtered.json >/dev/null
+              jq -e '.report.experimental_filter.max_aligned_volume == 0.6' filtered.json >/dev/null
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat exp_status.json; exit 10; fi
+          done
+          exit 11
+
+      - name: Compare baseline vs filtered
+        env:
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          python - <<'PY'
+          import json, os
+          def summarize(path):
+              r=json.load(open(path))['report']
+              trades=[x for x in r['trades'] if x['status']=='closed']
+              rets=[x['net_return_including_funding'] for x in trades]
+              pos=sum(x for x in rets if x>0); neg=-sum(x for x in rets if x<0)
+              eq=1.0; peak=1.0; dd=0.0
+              for x in rets:
+                  eq*=1+x; peak=max(peak,eq); dd=max(dd,1-eq/peak)
+              return {
+                  'status':r['status'],'start_iso':r['start_iso'],'end_iso':r['end_iso'],
+                  'signals':r['signals'],'closed_trades':len(trades),
+                  'wins':sum(x>0 for x in rets),'win_rate':sum(x>0 for x in rets)/len(rets) if rets else None,
+                  'mean_net':sum(rets)/len(rets) if rets else None,
+                  'sum_net':sum(rets),'profit_factor':pos/neg if neg else None,
+                  'compounded_full_notional':eq-1,'max_drawdown_full_notional':dd,
+                  'skipped_overlapping_signals':r['skipped_overlapping_signals'],
+                  'experimental_filter':r.get('experimental_filter')
+              }
+          out={'symbol':os.environ['SYMBOL'],'baseline':summarize('baseline.json'),'filtered':summarize('filtered.json')}
+          out['delta_mean_net']=out['filtered']['mean_net']-out['baseline']['mean_net']
+          out['delta_profit_factor']=(out['filtered']['profit_factor'] or 0)-(out['baseline']['profit_factor'] or 0)
+          open('comparison.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.symbol }}-oos-aligned-volume-30d
+          path: |
+            baseline.json
+            filtered.json
+            comparison.json
