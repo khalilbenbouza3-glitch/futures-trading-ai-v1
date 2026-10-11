@@ -1,0 +1,49 @@
+name: Diagnostic 128 executed trades
+on:
+  push:
+    paths:
+      - '.github/workflows/diagnostic-128-trades.yml'
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: BTCUSDT
+            base: https://futures-backtest-btc-final.onrender.com
+            expected: 50
+          - symbol: ETHUSDT
+            base: https://futures-backtest-chunks.onrender.com
+            expected: 78
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run exact 120d feature reconstruction
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+          EXPECTED: ${{ matrix.expected }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST "$BASE/diagnose/start?symbol=$SYMBOL" > start.json
+          cat start.json
+          test "$(jq -r '.status' start.json)" = "running"
+          for i in $(seq 1 100); do
+            sleep 10
+            curl --retry 5 --retry-all-errors -fsS "$BASE/diagnose/status" > status.json
+            st=$(jq -r '.status' status.json)
+            echo "$SYMBOL poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              test "$(jq -r '.report.symbol' status.json)" = "$SYMBOL"
+              test "$(jq -r '.report.count' status.json)" = "$EXPECTED"
+              jq '.report' status.json > "${SYMBOL}_features_120d.json"
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat status.json; exit 10; fi
+          done
+          exit 11
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.symbol }}-features-120d
+          path: ${{ matrix.symbol }}_features_120d.json
