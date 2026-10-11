@@ -12,9 +12,9 @@ jobs:
       matrix:
         include:
           - symbol: BTCUSDT
-            base: https://futures-oi-holdout-btc.onrender.com
+            base: https://futures-oi-holdout-btc-v2.onrender.com
           - symbol: ETHUSDT
-            base: https://futures-oi-holdout-eth.onrender.com
+            base: https://futures-oi-holdout-eth-v2.onrender.com
     runs-on: ubuntu-latest
     env:
       HOLDOUT_ANCHOR_MS: 1791594000000
