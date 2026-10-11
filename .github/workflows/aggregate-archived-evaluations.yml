@@ -20,9 +20,20 @@ jobs:
           import json, os, pathlib, subprocess
           repo=os.environ["GITHUB_REPOSITORY"]
           pathlib.Path("evaluation-archives").mkdir(exist_ok=True)
-          p=subprocess.check_output(["gh","api",f"repos/{repo}/actions/workflows/evaluate-archived-scan.yml/runs","-f","status=success","-f","per_page=100","--method","GET"],text=True)
           seen=set()
-          for run in json.loads(p)["workflow_runs"]:
+          runs=[]
+          # Traverse all available pages, not just the newest 100 workflow runs.
+          for page in range(1, 11):
+              p=subprocess.check_output(["gh","api",f"repos/{repo}/actions/workflows/evaluate-archived-scan.yml/runs",
+                                         "-f","status=success","-f","per_page=100","-f",f"page={page}","--method","GET"],text=True)
+              batch=json.loads(p)["workflow_runs"]
+              runs.extend(batch)
+              if len(batch)<100:
+                  break
+          else:
+              print("WARNING: Reached 1000-run scan cap; older runs may be omitted.")
+          print("Successful evaluation runs inspected:",len(runs))
+          for run in runs:
               a=subprocess.run(["gh","api",f"repos/{repo}/actions/runs/{run['id']}/artifacts"],capture_output=True,text=True)
               if a.returncode: continue
               for artifact in json.loads(a.stdout).get("artifacts",[]):
