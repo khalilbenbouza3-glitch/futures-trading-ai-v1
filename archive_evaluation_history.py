@@ -26,7 +26,10 @@ def update_ledger(paths, ledger_path):
             rows.append({"symbol": row["symbol"], "score": row.get("score"),
                          "outcome": row.get("outcome"), "net_r": net_r,
                          "net_return_pct": row.get("net_return_pct"),
-                         "entry": row.get("entry"), "exit": row.get("exit")})
+                         "entry": row.get("entry"), "exit": row.get("exit"),
+                         "side": row.get("side"), "signal_at_ms": row.get("signal_at_ms"),
+                         "entry_bar_start_ms": row.get("entry_bar_start_ms"),
+                         "exit_bar_start_ms": row.get("exit_bar_start_ms")})
         if scan_id in ledger["scans"]:
             if ledger["scans"][scan_id] != rows:
                 raise ValueError(f"Conflicting immutable scan record: {scan_id}")
