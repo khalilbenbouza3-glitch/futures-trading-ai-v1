@@ -1,0 +1,125 @@
+name: OI consistency untouched 30d holdout
+on:
+  push:
+    paths:
+      - '.github/workflows/oi-consistency-untouched-30d.yml'
+  workflow_dispatch:
+
+jobs:
+  holdout:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - symbol: BTCUSDT
+            base: https://futures-oi-holdout-btc.onrender.com
+          - symbol: ETHUSDT
+            base: https://futures-oi-holdout-eth.onrender.com
+    runs-on: ubuntu-latest
+    env:
+      HOLDOUT_ANCHOR_MS: 1791594000000
+      END_DAYS_AGO: 120
+      DAYS: 30
+    steps:
+      - name: Wait for holdout service
+        env:
+          BASE: ${{ matrix.base }}
+        run: |
+          set -euo pipefail
+          version=""
+          for i in $(seq 1 120); do
+            version=$(curl --retry 2 --retry-all-errors -fsS "$BASE/openapi.json" 2>/dev/null | jq -r '.info.version // empty' || true)
+            echo "api_version=${version:-unavailable} poll=$i"
+            [ "$version" = "1.0" ] && break
+            sleep 5
+          done
+          test "$version" = "1.0"
+
+      - name: Run untouched baseline
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST \
+            "$BASE/baseline/start?symbol=$SYMBOL&days=$DAYS&end_days_ago=$END_DAYS_AGO&initial_busy_until_ms=-1&anchor_ms=$HOLDOUT_ANCHOR_MS" > start.json
+          test "$(jq -r '.status' start.json)" = "running"
+          for i in $(seq 1 100); do
+            sleep 15
+            curl --retry 5 --retry-all-errors -fsS "$BASE/baseline/status" > status.json
+            st=$(jq -r '.status' status.json)
+            echo "$SYMBOL baseline poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              cp status.json baseline.json
+              jq -e '.report.status == "REPLAYED"' baseline.json >/dev/null
+              jq -e '([.report.coverage[] | .missing] | add) == 0' baseline.json >/dev/null
+              jq -e '.report.skipped_no_funding == 0 and .report.skipped_warmup == 0' baseline.json >/dev/null
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat status.json; exit 10; fi
+          done
+          exit 11
+
+      - name: Run OI-consistent candidate
+        env:
+          BASE: ${{ matrix.base }}
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          set -euo pipefail
+          curl --retry 5 --retry-all-errors -fsS -X POST \
+            "$BASE/candidate/start?symbol=$SYMBOL&days=$DAYS&end_days_ago=$END_DAYS_AGO&initial_busy_until_ms=-1&anchor_ms=$HOLDOUT_ANCHOR_MS" > start_candidate.json
+          test "$(jq -r '.status' start_candidate.json)" = "running"
+          for i in $(seq 1 100); do
+            sleep 15
+            curl --retry 5 --retry-all-errors -fsS "$BASE/candidate/status" > candidate_status.json
+            st=$(jq -r '.status' candidate_status.json)
+            echo "$SYMBOL candidate poll=$i status=$st"
+            if [ "$st" = "finished" ]; then
+              cp candidate_status.json candidate.json
+              jq -e '.report.status == "REPLAYED"' candidate.json >/dev/null
+              jq -e '([.report.coverage[] | .missing] | add) == 0' candidate.json >/dev/null
+              jq -e '.report.skipped_no_funding == 0 and .report.skipped_warmup == 0' candidate.json >/dev/null
+              jq -e '.report.experimental_oi_consistency.enabled == true' candidate.json >/dev/null
+              exit 0
+            fi
+            if [ "$st" = "error" ]; then cat candidate_status.json; exit 10; fi
+          done
+          exit 11
+
+      - name: Compare untouched holdout
+        env:
+          SYMBOL: ${{ matrix.symbol }}
+        run: |
+          python - <<'PY'
+          import json, os
+          def summarize(path):
+              r=json.load(open(path))['report']
+              tr=[t for t in r['trades'] if t['status']=='closed']
+              rets=[t['net_return_including_funding'] for t in tr]
+              pos=sum(x for x in rets if x>0); neg=-sum(x for x in rets if x<0)
+              eq=1.; peak=1.; dd=0.
+              for x in rets:
+                  eq*=1+x; peak=max(peak,eq); dd=max(dd,1-eq/peak)
+              return {'start_iso':r['start_iso'],'end_iso':r['end_iso'],'signals':r['signals'],
+                      'closed_trades':len(tr),'wins':sum(x>0 for x in rets),
+                      'win_rate':sum(x>0 for x in rets)/len(rets) if rets else None,
+                      'mean_net':sum(rets)/len(rets) if rets else None,
+                      'sum_net':sum(rets),'profit_factor':pos/neg if neg else None,
+                      'compounded_full_notional':eq-1,'max_drawdown_full_notional':dd,
+                      'skipped_overlapping_signals':r['skipped_overlapping_signals'],
+                      'oi_experiment':r.get('experimental_oi_consistency')}
+          out={'symbol':os.environ['SYMBOL'],'holdout_pre_registered_window':True,
+               'baseline':summarize('baseline.json'),'candidate':summarize('candidate.json')}
+          out['delta_mean_net']=out['candidate']['mean_net']-out['baseline']['mean_net']
+          out['delta_profit_factor']=(out['candidate']['profit_factor'] or 0)-(out['baseline']['profit_factor'] or 0)
+          open('comparison.json','w').write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.symbol }}-oi-consistency-untouched-30d
+          path: |
+            baseline.json
+            candidate.json
+            comparison.json
