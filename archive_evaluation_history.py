@@ -31,7 +31,13 @@ def update_ledger(paths, ledger_path):
                          "entry_bar_start_ms": row.get("entry_bar_start_ms"),
                          "exit_bar_start_ms": row.get("exit_bar_start_ms")})
         if scan_id in ledger["scans"]:
-            if ledger["scans"][scan_id] != rows:
+            previous = ledger["scans"][scan_id]
+            # Older immutable records predate timing metadata. Compare only their
+            # original fields; never rewrite previously archived results.
+            if len(previous) != len(rows) or any(
+                any(new.get(key) != value for key, value in old.items())
+                for old, new in zip(previous, rows)
+            ):
                 raise ValueError(f"Conflicting immutable scan record: {scan_id}")
             continue
         ledger["scans"][scan_id] = rows
