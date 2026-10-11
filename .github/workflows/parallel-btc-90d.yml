@@ -1,0 +1,109 @@
+name: Parallel BTC 90d fixed-anchor backtest
+
+on:
+  push:
+    paths:
+      - '.github/workflows/parallel-btc-90d.yml'
+  workflow_dispatch:
+
+jobs:
+  btc-backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      BASE: https://futures-backtest-btc-final.onrender.com
+      ANCHOR_MS: '1791680400000'
+    steps:
+      - name: Wait for exact API version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=""
+          for i in $(seq 1 90); do
+            version=$(curl --retry 2 --retry-all-errors -fsS "$BASE/openapi.json" 2>/dev/null | jq -r '.info.version // empty' || true)
+            echo "api_version=${version:-unavailable} poll=$i"
+            if [ "$version" = "1.2" ]; then break; fi
+            sleep 5
+          done
+          test "$version" = "1.2"
+
+      - name: Run BTC chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          echo "$ANCHOR_MS" > reports/anchor_ms.txt
+
+          run_chunk() {
+            local end_days="$1" busy="$2" outfile="$3"
+            echo "START BTCUSDT end_days_ago=$end_days busy=$busy anchor=$ANCHOR_MS"
+            curl --retry 5 --retry-all-errors -fsS -X POST \
+              "$BASE/chunk/start?symbol=BTCUSDT&days=30&end_days_ago=$end_days&initial_busy_until_ms=$busy&anchor_ms=$ANCHOR_MS" \
+              > /tmp/start.json
+            cat /tmp/start.json
+            test "$(jq -r '.status' /tmp/start.json)" = "running"
+            for i in $(seq 1 80); do
+              sleep 15
+              curl --retry 5 --retry-all-errors -fsS "$BASE/chunk/status" > /tmp/status.json
+              st=$(jq -r '.status' /tmp/status.json)
+              echo "BTCUSDT end_days_ago=$end_days poll=$i status=$st"
+              if [ "$st" = "finished" ]; then
+                cp /tmp/status.json "$outfile"
+                jq -e '.report.status == "REPLAYED"' "$outfile" >/dev/null
+                jq -e '([.report.coverage[] | .missing] | add) == 0' "$outfile" >/dev/null
+                jq -e '.report.skipped_no_funding == 0' "$outfile" >/dev/null
+                jq -e '.report.skipped_warmup == 0' "$outfile" >/dev/null
+                jq -e --argjson a "$ANCHOR_MS" '.report.anchor_ms == $a' "$outfile" >/dev/null
+                echo "FINISHED trades=$(jq -r '.report.closed_trades' "$outfile") busy=$(jq -r '.report.final_busy_until_ms' "$outfile")"
+                return 0
+              fi
+              if [ "$st" = "error" ] || [ "$st" = "idle" ]; then cat /tmp/status.json; return 10; fi
+            done
+            return 11
+          }
+
+          busy=-1
+          for end_days in 61 31 1; do
+            out="reports/BTCUSDT_${end_days}.json"
+            run_chunk "$end_days" "$busy" "$out"
+            busy=$(jq -r '.report.final_busy_until_ms' "$out")
+          done
+
+      - name: Summarize BTC
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib, collections
+          p=pathlib.Path('reports'); anchor=int((p/'anchor_ms.txt').read_text())
+          rs=[json.loads((p/f'BTCUSDT_{e}.json').read_text())['report'] for e in (61,31,1)]
+          assert rs[0]['end_ms']==rs[1]['start_ms'] and rs[1]['end_ms']==rs[2]['start_ms']
+          assert rs[-1]['end_ms']-rs[0]['start_ms']==90*86_400_000
+          trades=sorted([t for r in rs for t in r['trades'] if t['status']=='closed'],key=lambda t:t['signal_time_ms'])
+          rets=[t['net_return_including_funding'] for t in trades]
+          eq=1.0; peak=1.0; dd=0.0
+          for x in rets:
+              eq*=1+x; peak=max(peak,eq); dd=max(dd,1-eq/peak)
+          pos=[x for x in rets if x>0]; neg=[x for x in rets if x<0]
+          out={'symbol':'BTCUSDT','anchor_ms':anchor,'closed_trades':len(rets),
+               'wins':sum(x>0 for x in rets),'win_rate':sum(x>0 for x in rets)/len(rets) if rets else None,
+               'mean_net_return_with_funding':sum(rets)/len(rets) if rets else None,
+               'arithmetic_sum_net_returns':sum(rets),
+               'compounded_full_notional_sequential_illustration':eq-1,
+               'max_drawdown_full_notional_sequential_illustration':dd,
+               'profit_factor_return_units':sum(pos)/abs(sum(neg)) if neg else None,
+               'signals':sum(r['signals'] for r in rs),
+               'skipped_overlapping_signals':sum(r['skipped_overlapping_signals'] for r in rs),
+               'exit_reasons':dict(collections.Counter(t['exit_reason'] for t in trades)),
+               'read_only':True}
+          (p/'BTC_summary.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Upload BTC reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-90d-fixed-anchor-reports
+          path: reports/
+          if-no-files-found: warn
