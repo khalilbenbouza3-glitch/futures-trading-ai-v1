@@ -74,8 +74,12 @@ jobs:
           else
             echo "No new archived scan results."
           fi
+      - name: Analyze unique timestamped signals
+        run: python analyze_unique_signals.py
       - uses: actions/upload-artifact@v4
         with:
           name: aggregate-research-summary
-          path: aggregate-summary.json
+          path: |
+            aggregate-summary.json
+            unique-signal-summary.json
           retention-days: 30
