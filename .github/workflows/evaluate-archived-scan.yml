@@ -118,4 +118,4 @@ jobs:
             evaluation-input.json
             evaluation-result.json
             research-summary.json
-          retention-days: 7
+          retention-days: 30
