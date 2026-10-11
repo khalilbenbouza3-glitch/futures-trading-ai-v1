@@ -1,0 +1,194 @@
+name: Final 90d fixed-anchor backtest
+
+on:
+  push:
+    paths:
+      - '.github/workflows/final-90d-chunk-backtest.yml'
+  workflow_dispatch:
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      BASE: https://futures-backtest-chunks-v2.onrender.com
+    steps:
+      - name: Wait for exact backtest API version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=""
+          for i in $(seq 1 90); do
+            version=$(curl --retry 2 --retry-all-errors -fsS "$BASE/openapi.json" 2>/dev/null | jq -r '.info.version // empty' || true)
+            echo "api_version=${version:-unavailable} poll=$i"
+            if [ "$version" = "1.2" ]; then break; fi
+            sleep 5
+          done
+          test "$version" = "1.2"
+
+      - name: Run six exact replay chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          ANCHOR_MS=$(python - <<'PY'
+          import time
+          bar=900_000
+          print((int(time.time()*1000)//bar)*bar)
+          PY
+          )
+          echo "$ANCHOR_MS" > reports/anchor_ms.txt
+          echo "Fixed anchor_ms=$ANCHOR_MS"
+
+          wait_not_running() {
+            local st=""
+            for i in $(seq 1 60); do
+              st=$(curl --retry 3 --retry-all-errors -fsS "$BASE/chunk/status" 2>/dev/null | jq -r '.status // "unknown"' || true)
+              echo "preflight status=$st poll=$i"
+              if [ "$st" != "running" ]; then return 0; fi
+              sleep 10
+            done
+            echo "Service stayed busy too long" >&2
+            return 9
+          }
+
+          run_chunk() {
+            local symbol="$1" end_days="$2" busy="$3" outfile="$4"
+            wait_not_running
+            echo "START symbol=$symbol end_days_ago=$end_days busy=$busy anchor=$ANCHOR_MS"
+            curl --retry 5 --retry-all-errors -fsS -X POST \
+              "$BASE/chunk/start?symbol=$symbol&days=30&end_days_ago=$end_days&initial_busy_until_ms=$busy&anchor_ms=$ANCHOR_MS" \
+              > /tmp/start.json
+            cat /tmp/start.json
+            test "$(jq -r '.status' /tmp/start.json)" = "running"
+
+            for i in $(seq 1 80); do
+              sleep 15
+              curl --retry 5 --retry-all-errors -fsS "$BASE/chunk/status" > /tmp/status.json
+              st=$(jq -r '.status' /tmp/status.json)
+              echo "symbol=$symbol end_days_ago=$end_days poll=$i status=$st"
+              if [ "$st" = "finished" ]; then
+                cp /tmp/status.json "$outfile"
+                jq -e '.report.status == "REPLAYED"' "$outfile" >/dev/null
+                jq -e '([.report.coverage[] | .missing] | add) == 0' "$outfile" >/dev/null
+                jq -e '.report.skipped_no_funding == 0' "$outfile" >/dev/null
+                jq -e '.report.skipped_warmup == 0' "$outfile" >/dev/null
+                jq -e --argjson a "$ANCHOR_MS" '.report.anchor_ms == $a' "$outfile" >/dev/null
+                echo "FINISHED symbol=$symbol end_days_ago=$end_days trades=$(jq -r '.report.closed_trades' "$outfile") busy=$(jq -r '.report.final_busy_until_ms' "$outfile")"
+                return 0
+              fi
+              if [ "$st" = "error" ] || [ "$st" = "idle" ]; then
+                cat /tmp/status.json
+                return 10
+              fi
+            done
+            echo "Chunk timeout: $symbol $end_days" >&2
+            return 11
+          }
+
+          for symbol in BTCUSDT ETHUSDT; do
+            busy=-1
+            for end_days in 61 31 1; do
+              outfile="reports/${symbol}_${end_days}.json"
+              run_chunk "$symbol" "$end_days" "$busy" "$outfile"
+              busy=$(jq -r '.report.final_busy_until_ms' "$outfile")
+            done
+          done
+
+      - name: Aggregate and verify 90-day reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, math, pathlib, collections
+
+          DAY=86_400_000
+          root=pathlib.Path('reports')
+          anchor=int((root/'anchor_ms.txt').read_text().strip())
+          symbols=('BTCUSDT','ETHUSDT')
+          ends=(61,31,1)
+          final={'anchor_ms':anchor,'window_ends_days_ago':list(ends),'symbols':{},'overall_trade_distribution':{},
+                 'portfolio_return':None,
+                 'portfolio_return_reason':'BTC and ETH trades may overlap and no capital-allocation rule is defined; no combined portfolio return is claimed.',
+                 'assumptions':{'entry':'next_15m_open','fee_per_side':0.0006,'slippage_per_side':0.0002,
+                                'same_bar_collision':'stop_first','max_holding':'24h','funding':'historical rate; constant-notional approximation'},
+                 'historical_replay_completed':True,'read_only':True}
+          all_returns=[]
+          all_trades=[]
+
+          def stats(returns):
+              n=len(returns)
+              wins=sum(r>0 for r in returns)
+              pos=[r for r in returns if r>0]
+              neg=[r for r in returns if r<0]
+              equity=1.0; peak=1.0; maxdd=0.0
+              for r in returns:
+                  equity*=1+r
+                  peak=max(peak,equity)
+                  maxdd=max(maxdd,1-equity/peak)
+              return {
+                  'closed_trades':n,
+                  'wins':wins,
+                  'losses':sum(r<0 for r in returns),
+                  'win_rate':wins/n if n else None,
+                  'mean_net_return_with_funding':sum(returns)/n if n else None,
+                  'arithmetic_sum_net_returns':sum(returns),
+                  'compounded_full_notional_sequential_illustration':equity-1 if n else 0.0,
+                  'max_drawdown_full_notional_sequential_illustration':maxdd if n else 0.0,
+                  'profit_factor_return_units':sum(pos)/abs(sum(neg)) if neg else (None if not pos else float('inf')),
+                  'avg_winner':sum(pos)/len(pos) if pos else None,
+                  'avg_loser':sum(neg)/len(neg) if neg else None,
+              }
+
+          for symbol in symbols:
+              reports=[]
+              for e in ends:
+                  obj=json.loads((root/f'{symbol}_{e}.json').read_text())
+                  assert obj['status']=='finished'
+                  r=obj['report']
+                  assert r['status']=='REPLAYED'
+                  assert r['anchor_ms']==anchor
+                  assert r['skipped_no_funding']==0
+                  assert r['skipped_warmup']==0
+                  assert all(v['missing']==0 for v in r['coverage'].values())
+                  reports.append(r)
+              assert reports[0]['end_ms']==reports[1]['start_ms']
+              assert reports[1]['end_ms']==reports[2]['start_ms']
+              assert reports[-1]['end_ms']-reports[0]['start_ms']==90*DAY
+              assert reports[-1]['end_ms']==anchor-DAY
+              trades=[t for r in reports for t in r['trades'] if t.get('status')=='closed']
+              trades.sort(key=lambda x:x['signal_time_ms'])
+              returns=[t['net_return_including_funding'] for t in trades]
+              all_returns.extend(returns); all_trades.extend(trades)
+              s=stats(returns)
+              s.update({
+                  'signals':sum(r['signals'] for r in reports),
+                  'rejected':sum(r['rejected'] for r in reports),
+                  'skipped_overlapping_signals':sum(r['skipped_overlapping_signals'] for r in reports),
+                  'skipped_no_funding':sum(r['skipped_no_funding'] for r in reports),
+                  'window_start_ms':reports[0]['start_ms'],
+                  'window_end_ms':reports[-1]['end_ms'],
+                  'exit_reasons':dict(collections.Counter(t['exit_reason'] for t in trades)),
+                  'long_trades':sum(t['side']=='LONG' for t in trades),
+                  'short_trades':sum(t['side']=='SHORT' for t in trades),
+                  'backtest_validated_flag_in_engine':all(r.get('backtest_validated') is True for r in reports),
+              })
+              final['symbols'][symbol]=s
+
+          overall=stats(all_returns)
+          # Compounding across both symbols is deliberately removed: cross-symbol positions may overlap.
+          overall.pop('compounded_full_notional_sequential_illustration',None)
+          overall.pop('max_drawdown_full_notional_sequential_illustration',None)
+          overall['exit_reasons']=dict(collections.Counter(t['exit_reason'] for t in all_trades))
+          final['overall_trade_distribution']=overall
+          (root/'final_summary.json').write_text(json.dumps(final,indent=2,allow_nan=False))
+          print(json.dumps(final,indent=2,allow_nan=False))
+          PY
+
+      - name: Upload exact reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-90d-fixed-anchor-reports
+          path: reports/
+          if-no-files-found: warn
