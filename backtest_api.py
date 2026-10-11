@@ -6,22 +6,26 @@ from fastapi import FastAPI, HTTPException
 import historical_replay_chunk as hrc
 from diagnostic_features import diagnose
 from experimental_replay import replay_chunk_filtered
+from fidelity_replay import replay_chunk_with_price_validation
 
 BAR = 900_000
 DAY = 86_400_000
-app = FastAPI(title="Futures Backtest Chunks", version="1.4")
+app = FastAPI(title="Futures Backtest Chunks", version="1.5")
 state = {"status": "idle", "read_only": True}
 job_lock = asyncio.Lock()
 diagnostic_state = {"status":"idle","read_only":True}
 diagnostic_lock = asyncio.Lock()
 experiment_state = {"status":"idle","read_only":True}
 experiment_lock = asyncio.Lock()
+fidelity_state = {"status":"idle","read_only":True}
+fidelity_lock = asyncio.Lock()
 
 @app.get("/health")
 async def health():
     return {"ok": True, "status": state.get("status"),
             "diagnostic_status":diagnostic_state.get("status"),
             "experiment_status":experiment_state.get("status"),
+            "fidelity_status":fidelity_state.get("status"),
             "read_only": True}
 
 async def _run_with_historical_boundary(call, anchor_ms):
@@ -160,3 +164,49 @@ async def start_experiment(symbol:str,days:int=30,end_days_ago:int=1,
 @app.get("/experiment/status")
 async def experiment_status():
     return experiment_state
+
+async def fidelity_worker(symbol,days,end_days_ago,initial_busy_until_ms,anchor_ms,max_entry_drift_r):
+    global fidelity_state
+    try:
+        result=await _run_with_historical_boundary(
+            lambda: replay_chunk_with_price_validation(symbol=symbol,days=days,end_days_ago=end_days_ago,
+                                                        initial_busy_until_ms=initial_busy_until_ms,
+                                                        max_entry_drift_r=max_entry_drift_r),
+            anchor_ms)
+        fidelity_state={"status":"finished","read_only":True,"report":result}
+    except Exception as exc:
+        fidelity_state={"status":"error","read_only":True,"error_type":type(exc).__name__,
+                        "error":str(exc)[:500],"anchor_ms":anchor_ms}
+    finally:
+        if fidelity_lock.locked():
+            fidelity_lock.release()
+
+@app.post("/fidelity/start")
+async def start_fidelity(symbol:str,days:int=30,end_days_ago:int=1,
+                         initial_busy_until_ms:int=-1,anchor_ms:int=0,
+                         max_entry_drift_r:float=0.35):
+    global fidelity_state
+    if symbol not in ("BTCUSDT","ETHUSDT"):
+        raise HTTPException(status_code=400,detail="Unsupported symbol")
+    if not 1<=days<=30 or not 1<=end_days_ago<=120:
+        raise HTTPException(status_code=400,detail="Invalid window")
+    if not 0.0<=max_entry_drift_r<=2.0:
+        raise HTTPException(status_code=400,detail="Invalid max_entry_drift_r")
+    current_anchor=(int(time.time()*1000)//BAR)*BAR
+    if anchor_ms==0:
+        anchor_ms=current_anchor
+    if anchor_ms%BAR or anchor_ms<=0 or anchor_ms>current_anchor:
+        raise HTTPException(status_code=400,detail="Invalid anchor_ms")
+    if fidelity_lock.locked():
+        return fidelity_state
+    await fidelity_lock.acquire()
+    fidelity_state={"status":"running","read_only":True,"symbol":symbol,"days":days,
+                    "end_days_ago":end_days_ago,"initial_busy_until_ms":initial_busy_until_ms,
+                    "anchor_ms":anchor_ms,"max_entry_drift_r":max_entry_drift_r}
+    asyncio.create_task(fidelity_worker(symbol,days,end_days_ago,initial_busy_until_ms,
+                                        anchor_ms,max_entry_drift_r))
+    return fidelity_state
+
+@app.get("/fidelity/status")
+async def fidelity_status():
+    return fidelity_state
