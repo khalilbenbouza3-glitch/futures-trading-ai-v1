@@ -45,12 +45,27 @@ jobs:
           if not data.get("updated_at") or not isinstance(data.get("signals"),list):
               raise SystemExit("Invalid scanner payload")
           pathlib.Path("scan-result.json").write_text(json.dumps(data,indent=2))
-          print("Archived Render scan",data["updated_at"],"signals",len(data["signals"]))
+          from collections import Counter
+          counts=Counter(str(s.get("side","MISSING")) for s in data["signals"])
+          actionable=counts.get("LONG",0)+counts.get("SHORT",0)
+          diagnostics={
+              "updated_at":data["updated_at"],
+              "status":data["status"],
+              "pairs_scanned":data.get("pairs_scanned"),
+              "signals_total":len(data["signals"]),
+              "actionable_signals":actionable,
+              "side_counts":dict(sorted(counts.items())),
+              "scan_executed":scan_response["scan_executed"]
+          }
+          pathlib.Path("scan-diagnostics.json").write_text(json.dumps(diagnostics,indent=2))
+          print("SCAN_DIAGNOSTICS",json.dumps(diagnostics,sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: latest-market-scan
-          path: scan-result.json
+          path: |
+            scan-result.json
+            scan-diagnostics.json
           retention-days: 2
           if-no-files-found: error
