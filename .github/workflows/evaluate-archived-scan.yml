@@ -43,8 +43,8 @@ jobs:
                    "-f","status=success","-f","per_page=50","--method","GET"]
               runs=json.loads(subprocess.check_output(cmd,text=True))["workflow_runs"]
               now=time.time()
-              mature=[x for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=7*3600]
-              # Select newest mature scan; do not repeatedly evaluate oldest.
+              mature=[x for x in runs if now-datetime.fromisoformat(x["created_at"].replace("Z","+00:00")).timestamp()>=6*3600]
+              # Preliminary age filter only; collect_evaluation.py verifies 24 closed candles.
               ids=[str(x["id"]) for x in mature]
               previous=subprocess.run(["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/evaluate-archived-scan.yml/runs",
                                       "-f","status=success","-f","per_page=100","--method","GET"],capture_output=True,text=True)
@@ -82,6 +82,19 @@ jobs:
       - name: Fetch matured closed Bybit candles
         if: steps.archive.outputs.no_data != 'true'
         run: python collect_evaluation.py archive/scan-result.json --output evaluation-input.json
+      - name: Ensure actionable signals were collected
+        if: steps.archive.outputs.no_data != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          snapshot=json.load(open("archive/scan-result.json"))
+          collected=json.load(open("evaluation-input.json"))
+          expected=sum(s.get("side") in ("LONG","SHORT") for s in snapshot.get("signals",[]))
+          actual=len(collected["signals"])
+          print(f"Expected actionable signals: {expected}; collected: {actual}")
+          if actual != expected or expected == 0:
+              raise SystemExit("Incomplete or empty evaluation; retry on next workflow run")
+          PY
       - name: Evaluate without trading
         if: steps.archive.outputs.no_data != 'true'
         run: python evaluation.py evaluation-input.json --output evaluation-result.json
