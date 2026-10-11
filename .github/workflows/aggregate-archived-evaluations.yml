@@ -1,0 +1,55 @@
+name: Aggregate archived evaluations
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '45 23 * * *'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download recent completed evaluation artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, subprocess
+          repo=os.environ["GITHUB_REPOSITORY"]
+          pathlib.Path("evaluation-archives").mkdir(exist_ok=True)
+          p=subprocess.check_output(["gh","api",f"repos/{repo}/actions/workflows/evaluate-archived-scan.yml/runs","-f","status=success","-f","per_page=100","--method","GET"],text=True)
+          seen=set()
+          for run in json.loads(p)["workflow_runs"]:
+              a=subprocess.run(["gh","api",f"repos/{repo}/actions/runs/{run['id']}/artifacts"],capture_output=True,text=True)
+              if a.returncode: continue
+              for artifact in json.loads(a.stdout).get("artifacts",[]):
+                  name=artifact["name"]
+                  if not name.startswith("evaluation-report-") or artifact.get("expired"): continue
+                  scan=name.removeprefix("evaluation-report-")
+                  if scan in seen: continue
+                  dest=f"evaluation-archives/{scan}"
+                  pathlib.Path(dest).mkdir(exist_ok=True)
+                  result=subprocess.run(["gh","run","download",str(run["id"]),"--repo",repo,"--name",name,"--dir",dest],capture_output=True,text=True)
+                  if result.returncode==0 and pathlib.Path(dest,"evaluation-result.json").is_file():
+                      seen.add(scan)
+          print("Distinct downloaded scan reports:",len(seen))
+          PY
+      - name: Aggregate read-only results
+        run: |
+          python - <<'PY'
+          import glob, json
+          from aggregate_archived_evaluations import aggregate
+          paths=glob.glob("evaluation-archives/*/evaluation-result.json")
+          result=aggregate(paths)
+          with open("aggregate-summary.json","w") as f:
+              json.dump(result,f,indent=2)
+          print(json.dumps(result,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aggregate-research-summary
+          path: aggregate-summary.json
+          retention-days: 30
