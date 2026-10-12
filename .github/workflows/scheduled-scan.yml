@@ -22,6 +22,7 @@ jobs:
           python-version: '3.11'
       - run: pip install httpx==0.28.1
       - name: Request scan from Render and archive fresh result
+        id: scanner
         env:
           SCANNER_URL: https://futures-trading-ai-v1.onrender.com
         run: |
@@ -54,6 +55,7 @@ jobs:
                   result.raise_for_status()
                   data=result.json()
           if scan_response is None:
+              print('No new snapshot to archive; exiting without upload',flush=True)
               raise SystemExit(0)
           if not data.get("fresh") or data.get("status") not in ("ok","partial"):
               raise SystemExit("No fresh successful Render scanner snapshot; not archiving")
@@ -76,9 +78,11 @@ jobs:
           }
           pathlib.Path("scan-diagnostics.json").write_text(json.dumps(diagnostics,indent=2))
           print("SCAN_DIAGNOSTICS",json.dumps(diagnostics,sort_keys=True))
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              output.write("archived=true\\n")
           PY
       - uses: actions/upload-artifact@v4
-        if: success() && hashFiles('scan-result.json') != ''
+        if: steps.scanner.outputs.archived == 'true'
         with:
           name: latest-market-scan
           path: |
