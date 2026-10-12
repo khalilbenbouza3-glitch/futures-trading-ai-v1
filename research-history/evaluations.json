@@ -72,6 +72,21 @@
         "score": 80.7,
         "symbol": "CHIPUSDT"
       }
+    ],
+    "38269628515": [
+      {
+        "entry": 0.002408,
+        "entry_bar_start_ms": 1791819000000,
+        "exit": 0.0022166205321157745,
+        "exit_bar_start_ms": 1791825300000,
+        "net_r": -1.01851,
+        "net_return_pct": -8.12287,
+        "outcome": "STOP",
+        "score": 70.1,
+        "side": "LONG",
+        "signal_at_ms": 1791818521208,
+        "symbol": "RSRUSDT"
+      }
     ]
   },
   "schema_version": 1
